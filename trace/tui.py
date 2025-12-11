@@ -490,40 +490,104 @@ class TUI:
         self.stdscr.attroff(note_color)
         y_pos += 1
 
-        # Evidence section header
-        y_pos += 1
-        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
-        self.stdscr.addstr(y_pos, 2, "▪ Evidence")
-        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
-
+        # Split screen between case notes and evidence
+        # Allocate space: half for case notes, half for evidence (if both exist)
+        available_space = self.content_h - 5
+        case_notes = self.active_case.notes
         evidence_list = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
-        # Show count
-        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
-        self.stdscr.addstr(y_pos, 14, f"({len(evidence_list)} items)")
-        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+        # Determine context: are we selecting notes or evidence?
+        # If there are case notes, treat indices 0 to len(notes)-1 as notes
+        # If there is evidence, treat indices len(notes) to len(notes)+len(evidence)-1 as evidence
+        total_items = len(case_notes) + len(evidence_list)
+
+        # Determine what's selected
+        selecting_note = self.selected_index < len(case_notes)
+
+        # Case Notes section
+        if case_notes:
+            if y_pos < self.height - 3:
+                self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+                self.stdscr.addstr(y_pos, 2, "▪ Case Notes")
+                self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+                self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+                self.stdscr.addstr(y_pos, 16, f"({len(case_notes)} notes)")
+                self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+            y_pos += 1
+
+            # Calculate space for case notes
+            notes_space = min(len(case_notes), available_space // 2) if evidence_list else available_space
+
+            # Update scroll position if needed
+            self._update_scroll(total_items)
+
+            # Display notes
+            for i in range(notes_space):
+                note_idx = self.scroll_offset + i
+                if note_idx >= len(case_notes):
+                    break
+
+                note = case_notes[note_idx]
+                y = y_pos + 1 + i
+                
+                # Check if we're out of bounds
+                if y >= self.height - 3:
+                    break
+
+                # Format note content
+                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
+                display_str = f"- {note_content}"
+                display_str = self._safe_truncate(display_str, self.width - 6)
+
+                # Highlight if selected
+                if note_idx == self.selected_index:
+                    self.stdscr.attron(curses.color_pair(1))
+                    self.stdscr.addstr(y, 4, display_str)
+                    self.stdscr.attroff(curses.color_pair(1))
+                else:
+                    self.stdscr.addstr(y, 4, display_str)
+
+            y_pos += notes_space + 1
+
+        # Evidence section header
+        y_pos += 1
+        if y_pos < self.height - 3:
+            self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(y_pos, 2, "▪ Evidence")
+            self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+
+            # Show count
+            self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.addstr(y_pos, 14, f"({len(evidence_list)} items)")
+            self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
 
         y_pos += 1
 
         if not evidence_list:
-            self.stdscr.attron(curses.color_pair(3))
-            self.stdscr.addstr(y_pos + 1, 4, "┌─ No evidence items")
-            self.stdscr.addstr(y_pos + 2, 4, "└─ Press 'N' to add evidence")
-            self.stdscr.attroff(curses.color_pair(3))
+            # Check if we have space to display the message
+            if y_pos + 2 < self.height - 2:
+                self.stdscr.attron(curses.color_pair(3))
+                self.stdscr.addstr(y_pos + 1, 4, "┌─ No evidence items")
+                self.stdscr.addstr(y_pos + 2, 4, "└─ Press 'N' to add evidence")
+                self.stdscr.attroff(curses.color_pair(3))
         else:
             # Scrolling for evidence list
-            # List starts at y=7
-            list_h = self.content_h - 5 # 7 is header offset
-            if list_h < 1: list_h = 1
+            # Calculate remaining space
+            remaining_space = self.content_h - (y_pos - 2)
+            list_h = max(1, remaining_space)
 
-            self._update_scroll(len(evidence_list))
+            self._update_scroll(total_items)
 
             for i in range(list_h):
-                idx = self.scroll_offset + i
-                if idx >= len(evidence_list): break
+                # Evidence indices start after case notes
+                evidence_idx = self.scroll_offset + i - len(case_notes)
+                if evidence_idx < 0 or evidence_idx >= len(evidence_list):
+                    continue
 
-                ev = evidence_list[idx]
+                ev = evidence_list[evidence_idx]
                 y = y_pos + 2 + i
+                if y >= self.height - 3:  # Don't overflow into status bar
+                    break
 
                 note_count = len(ev.notes)
 
@@ -563,7 +627,9 @@ class TUI:
                 # Truncate safely
                 base_display = self._safe_truncate(display_str, self.width - 6)
 
-                if idx == self.selected_index:
+                # Check if this evidence item is selected
+                item_idx = len(case_notes) + evidence_idx
+                if item_idx == self.selected_index:
                     # Highlighted selection
                     self.stdscr.attron(curses.color_pair(1))
                     self.stdscr.addstr(y, 4, base_display)
@@ -1082,8 +1148,10 @@ class TUI:
                 filtered = self._get_filtered_list(self.cases, "case_number", "name")
                 max_idx = len(filtered) - 1
             elif self.current_view == "case_detail" and self.active_case:
+                # Total items = case notes + evidence
+                case_notes = self.active_case.notes
                 filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-                max_idx = len(filtered) - 1
+                max_idx = len(case_notes) + len(filtered) - 1
             elif self.current_view == "evidence_detail" and self.active_evidence:
                 # Navigate through notes in evidence detail view
                 max_idx = len(self.active_evidence.notes) - 1
@@ -1120,12 +1188,23 @@ class TUI:
                     self.filter_query = "" # Reset filter on view change
             elif self.current_view == "case_detail":
                 if self.active_case:
+                    case_notes = self.active_case.notes
                     filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-                    if filtered:
-                        self.active_evidence = filtered[self.selected_index]
+
+                    # Check if selecting a note or evidence
+                    if self.selected_index < len(case_notes):
+                        # Selected a note - show note detail view
+                        self.current_note = case_notes[self.selected_index]
+                        self.previous_view = "case_detail"
+                        self.current_view = "note_detail"
+                        self.filter_query = ""
+                    elif filtered and self.selected_index - len(case_notes) < len(filtered):
+                        # Selected evidence - navigate to evidence detail
+                        evidence_idx = self.selected_index - len(case_notes)
+                        self.active_evidence = filtered[evidence_idx]
                         self.current_view = "evidence_detail"
                         self.selected_index = 0
-                        self.filter_query = "" # Reset filter
+                        self.filter_query = ""
             elif self.current_view == "tags_list":
                 # Enter tag -> show notes with that tag
                 if self.current_tags and self.selected_index < len(self.current_tags):
@@ -1143,6 +1222,7 @@ class TUI:
                 # Enter note -> show expanded view
                 if self.tag_notes and self.selected_index < len(self.tag_notes):
                     self.current_note = self.tag_notes[self.selected_index]
+                    self.previous_view = "tag_notes_list"
                     self.current_view = "note_detail"
                     self.selected_index = 0
                     self.scroll_offset = 0
@@ -1163,6 +1243,7 @@ class TUI:
                 # Enter note -> show expanded view
                 if self.ioc_notes and self.selected_index < len(self.ioc_notes):
                     self.current_note = self.ioc_notes[self.selected_index]
+                    self.previous_view = "ioc_notes_list"
                     self.current_view = "note_detail"
                     self.selected_index = 0
                     self.scroll_offset = 0
@@ -1175,7 +1256,8 @@ class TUI:
                 self.selected_index = 0
                 self.scroll_offset = 0
             elif self.current_view == "note_detail":
-                self.current_view = "tag_notes_list"
+                # Return to the view we came from
+                self.current_view = getattr(self, 'previous_view', 'case_detail')
                 self.current_note = None
                 self.selected_index = 0
                 self.scroll_offset = 0
@@ -1291,14 +1373,26 @@ class TUI:
                 self.show_message(f"Active Case: {case.case_number}")
 
         elif self.current_view == "case_detail" and self.active_case:
+            case_notes = self.active_case.notes
             filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-            if filtered:
-                ev = filtered[self.selected_index]
+
+            # Only allow setting active for evidence, not notes
+            if self.selected_index < len(case_notes):
+                # Selected a note - set case as active (not evidence)
+                self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=None)
+                self.global_active_case_id = self.active_case.case_id
+                self.global_active_evidence_id = None
+                self.show_message(f"Active: Case {self.active_case.case_number}")
+            elif filtered and self.selected_index - len(case_notes) < len(filtered):
+                # Selected evidence - set it as active
+                evidence_idx = self.selected_index - len(case_notes)
+                ev = filtered[evidence_idx]
                 self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=ev.evidence_id)
                 self.global_active_case_id = self.active_case.case_id
                 self.global_active_evidence_id = ev.evidence_id
                 self.show_message(f"Active: {ev.name}")
             else:
+                # Nothing selected - set case as active
                 self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=None)
                 self.global_active_case_id = self.active_case.case_id
                 self.global_active_evidence_id = None
@@ -1724,6 +1818,7 @@ class TUI:
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
+        win.keypad(1)  # Enable keypad mode for arrow keys
 
         while True:
             win.clear()
@@ -1820,6 +1915,7 @@ class TUI:
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
+        win.keypad(1)  # Enable keypad mode for arrow keys
         scroll_offset = 0
 
         while True:
@@ -2064,9 +2160,25 @@ class TUI:
                     self.show_message(f"Case {case_to_del.case_number} deleted.")
 
         elif self.current_view == "case_detail" and self.active_case:
+            # Determine if we're deleting a note or evidence based on selected index
+            case_notes = self.active_case.notes
             filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-            if filtered:
-                ev_to_del = filtered[self.selected_index]
+
+            # Check if selecting a note (indices 0 to len(notes)-1)
+            if self.selected_index < len(case_notes):
+                # Delete case note
+                note_to_del = case_notes[self.selected_index]
+                preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
+                if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                    self.active_case.notes.remove(note_to_del)
+                    self.storage.save_data()
+                    self.selected_index = 0
+                    self.scroll_offset = 0
+                    self.show_message("Note deleted.")
+            elif filtered and self.selected_index - len(case_notes) < len(filtered):
+                # Delete evidence (adjust index by subtracting case notes count)
+                evidence_idx = self.selected_index - len(case_notes)
+                ev_to_del = filtered[evidence_idx]
                 if self.dialog_confirm(f"Delete Evidence {ev_to_del.name}?"):
                     self.storage.delete_evidence(self.active_case.case_id, ev_to_del.evidence_id)
                     # Check active state
@@ -2074,9 +2186,7 @@ class TUI:
                         # Fallback to case active
                         self.state_manager.set_active(self.active_case.case_id, None)
                         self.global_active_evidence_id = None
-                    # Refresh (in-memory update was done by storage usually? No, storage reloads or we reload)
-                    # We need to reload active_case evidence list or trust storage.cases
-                    # It's better to reload from storage to be safe
+                    # Refresh
                     updated_case = self.storage.get_case(self.active_case.case_id)
                     if updated_case:
                         self.active_case = updated_case
