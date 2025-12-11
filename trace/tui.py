@@ -2117,28 +2117,43 @@ class TUI:
         y = int(self.height * 0.1)
         x = int(self.width * 0.1)
 
-        win = curses.newwin(h, w, y, x)
-        win.box()
-        win.addstr(1, 2, f"Notes: {self.active_case.case_number}", curses.A_BOLD)
+        while True:
+            win = curses.newwin(h, w, y, x)
+            win.box()
+            win.addstr(1, 2, f"Notes: {self.active_case.case_number}", curses.A_BOLD)
 
-        notes = self.active_case.notes
-        max_lines = h - 4
+            notes = self.active_case.notes
+            max_lines = h - 4
 
-        # Scroll last notes
-        display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
+            # Scroll last notes
+            display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
 
-        for i, note in enumerate(display_notes):
-            # Replace newlines with spaces for single-line display
-            note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-            display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
-            # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, w - 4)
-            win.addstr(3 + i, 2, display_str)
+            for i, note in enumerate(display_notes):
+                # Replace newlines with spaces for single-line display
+                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
+                display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
+                # Truncate safely for Unicode
+                display_str = self._safe_truncate(display_str, w - 4)
+                win.addstr(3 + i, 2, display_str)
 
-        win.addstr(h-2, 2, "Press any key to close")
-        win.refresh()
-        win.getch()
-        del win
+            win.addstr(h-2, 2, "[n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            win.refresh()
+            key = win.getch()
+            del win
+
+            # Handle key presses
+            if key == ord('n') or key == ord('N'):
+                # Save current view and switch to case_detail temporarily for context
+                saved_view = self.current_view
+                self.current_view = "case_detail"
+                self.dialog_add_note()
+                self.current_view = saved_view
+                # Continue loop to refresh with new note
+            elif key == ord('b') or key == ord('B') or key == ord('q') or key == ord('Q') or key == 27:  # 27 is Esc
+                break
+            else:
+                # Any other key also closes (backwards compatibility)
+                break
 
     def view_evidence_notes(self):
         if not self.active_evidence: return
@@ -2148,28 +2163,43 @@ class TUI:
         y = int(self.height * 0.1)
         x = int(self.width * 0.1)
 
-        win = curses.newwin(h, w, y, x)
-        win.box()
-        win.addstr(1, 2, f"Notes: {self.active_evidence.name}", curses.A_BOLD)
+        while True:
+            win = curses.newwin(h, w, y, x)
+            win.box()
+            win.addstr(1, 2, f"Notes: {self.active_evidence.name}", curses.A_BOLD)
 
-        notes = self.active_evidence.notes
-        max_lines = h - 4
+            notes = self.active_evidence.notes
+            max_lines = h - 4
 
-        # Scroll last notes
-        display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
+            # Scroll last notes
+            display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
 
-        for i, note in enumerate(display_notes):
-            # Replace newlines with spaces for single-line display
-            note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-            display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
-            # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, w - 4)
-            win.addstr(3 + i, 2, display_str)
+            for i, note in enumerate(display_notes):
+                # Replace newlines with spaces for single-line display
+                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
+                display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
+                # Truncate safely for Unicode
+                display_str = self._safe_truncate(display_str, w - 4)
+                win.addstr(3 + i, 2, display_str)
 
-        win.addstr(h-2, 2, "Press any key to close")
-        win.refresh()
-        win.getch()
-        del win
+            win.addstr(h-2, 2, "[n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            win.refresh()
+            key = win.getch()
+            del win
+
+            # Handle key presses
+            if key == ord('n') or key == ord('N'):
+                # Save current view and switch to evidence_detail temporarily for context
+                saved_view = self.current_view
+                self.current_view = "evidence_detail"
+                self.dialog_add_note()
+                self.current_view = saved_view
+                # Continue loop to refresh with new note
+            elif key == ord('b') or key == ord('B') or key == ord('q') or key == ord('Q') or key == 27:  # 27 is Esc
+                break
+            else:
+                # Any other key also closes (backwards compatibility)
+                break
 
     def export_iocs(self):
         """Export IOCs from current context to a text file"""
