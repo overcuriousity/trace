@@ -914,11 +914,11 @@ class TUI:
 
         current_y += 1
 
-        # Content with tag highlighting
+        # Content with tag and IOC highlighting
         self.stdscr.addstr(current_y, 2, "Content:", curses.A_BOLD)
         current_y += 1
 
-        # Display content with highlighted tags
+        # Display content with highlighted tags and IOCs
         content_lines = self.current_note.content.split('\n')
         max_content_lines = self.content_h - (current_y - 2) - 6  # Reserve space for hash/sig
 
@@ -926,27 +926,72 @@ class TUI:
             if current_y >= self.height - 6:
                 break
 
-            # Highlight tags in the content
+            # Highlight both tags and IOCs in the content
             display_line = self._safe_truncate(line, self.width - 6)
             x_pos = 4
 
-            # Simple tag highlighting - split by words and color tags
+            # Extract IOCs and tags from the line
+            from .models import Note
             import re
-            parts = re.split(r'(#\w+)', display_line)
-            for part in parts:
-                if part.startswith('#'):
+            
+            iocs_found = Note.extract_iocs_from_text(display_line)
+            tags_pattern = r'#\w+'
+            tags_found = [(match.group(), match.start()) for match in re.finditer(tags_pattern, display_line)]
+            
+            # Combine IOCs and tags into a list of (text, start_pos, type)
+            highlights = []
+            for ioc, _ in iocs_found:
+                pos = display_line.find(ioc)
+                if pos != -1:
+                    highlights.append((ioc, pos, 'ioc'))
+            for tag, pos in tags_found:
+                highlights.append((tag, pos, 'tag'))
+            
+            # Sort by position
+            highlights.sort(key=lambda x: x[1])
+            
+            if highlights:
+                # Display with highlighting
+                remaining = display_line
+                for i, (text, orig_pos, htype) in enumerate(highlights):
+                    # Find position in remaining text
+                    pos = remaining.find(text)
+                    if pos == -1:
+                        continue
+                    
+                    # Print text before highlight
+                    if pos > 0:
+                        try:
+                            self.stdscr.addstr(current_y, x_pos, remaining[:pos])
+                            x_pos += pos
+                        except curses.error:
+                            break
+                    
+                    # Print highlighted text
                     try:
-                        self.stdscr.addstr(current_y, x_pos, part, curses.color_pair(3))
+                        if htype == 'ioc':
+                            self.stdscr.addstr(current_y, x_pos, text, curses.color_pair(4))
+                        else:  # tag
+                            self.stdscr.addstr(current_y, x_pos, text, curses.color_pair(3))
+                        x_pos += len(text)
+                    except curses.error:
+                        break
+                    
+                    # Update remaining text
+                    remaining = remaining[pos + len(text):]
+                
+                # Print any remaining text
+                if remaining and x_pos < self.width - 2:
+                    try:
+                        self.stdscr.addstr(current_y, x_pos, remaining[:self.width - x_pos - 2])
                     except curses.error:
                         pass
-                    x_pos += len(part)
-                else:
-                    if x_pos < self.width - 2:
-                        try:
-                            self.stdscr.addstr(current_y, x_pos, part[:self.width - x_pos - 2])
-                        except curses.error:
-                            pass
-                        x_pos += len(part)
+            else:
+                # No highlights, display normally
+                try:
+                    self.stdscr.addstr(current_y, x_pos, display_line)
+                except curses.error:
+                    pass
 
             current_y += 1
 
@@ -999,11 +1044,11 @@ class TUI:
         help_lines.append(("  n                Add note to case", curses.A_NORMAL))
         help_lines.append(("  t                View tags across case and all evidence", curses.A_NORMAL))
         help_lines.append(("  i                View IOCs across case and all evidence", curses.A_NORMAL))
-        help_lines.append(("  v                View all case notes", curses.A_NORMAL))
+        help_lines.append(("  v                View all case notes with IOC highlighting", curses.A_NORMAL))
         help_lines.append(("  a                Set case (or selected evidence) as active", curses.A_NORMAL))
-        help_lines.append(("  d                Delete selected evidence item", curses.A_NORMAL))
+        help_lines.append(("  d                Delete selected evidence item or note", curses.A_NORMAL))
         help_lines.append(("  /                Filter evidence by name or description", curses.A_NORMAL))
-        help_lines.append(("  Enter            Open evidence details", curses.A_NORMAL))
+        help_lines.append(("  Enter            Open evidence details or jump to note", curses.A_NORMAL))
         help_lines.append(("", curses.A_NORMAL))
 
         # Evidence Detail View
@@ -1011,9 +1056,10 @@ class TUI:
         help_lines.append(("  n                Add note to evidence", curses.A_NORMAL))
         help_lines.append(("  t                View tags for this evidence", curses.A_NORMAL))
         help_lines.append(("  i                View IOCs for this evidence", curses.A_NORMAL))
-        help_lines.append(("  v                View all evidence notes", curses.A_NORMAL))
+        help_lines.append(("  v                View all evidence notes with IOC highlighting", curses.A_NORMAL))
         help_lines.append(("  a                Set evidence as active context", curses.A_NORMAL))
         help_lines.append(("  d                Delete selected note", curses.A_NORMAL))
+        help_lines.append(("  Enter            Jump to selected note in full view", curses.A_NORMAL))
         help_lines.append(("", curses.A_NORMAL))
 
         # Tags View
@@ -1043,7 +1089,11 @@ class TUI:
         help_lines.append(("  Active Context   Set with 'a' key - enables CLI quick notes", curses.A_NORMAL))
         help_lines.append(("                   Run: trace \"your note text\"", curses.A_DIM))
         help_lines.append(("  Tags             Use #hashtag in notes for auto-tagging", curses.A_NORMAL))
+        help_lines.append(("                   Highlighted in cyan throughout the interface", curses.A_DIM))
         help_lines.append(("  IOCs             Auto-extracts IPs, domains, URLs, hashes, emails", curses.A_NORMAL))
+        help_lines.append(("                   Highlighted in red in full note views", curses.A_DIM))
+        help_lines.append(("  Note Navigation  Press Enter on any note to view with highlighting", curses.A_NORMAL))
+        help_lines.append(("                   Selected note auto-centered and highlighted", curses.A_DIM))
         help_lines.append(("  Integrity        All notes SHA256 hashed + optional GPG signing", curses.A_NORMAL))
         help_lines.append(("  GPG Settings     Press 's' to toggle signing & select GPG key", curses.A_NORMAL))
         help_lines.append(("  Source Hash      Store evidence file hashes for chain of custody", curses.A_NORMAL))
@@ -1200,9 +1250,39 @@ class TUI:
                     self.current_view = "case_detail"
                     self.selected_index = 0
                     self.scroll_offset = 0
-                    self.filter_query = "" # Reset filter on view change
+                    self.filter_query = ""
+            elif self.current_view == "evidence_detail" and self.active_evidence:
+                # Check if a note is selected
+                notes = self.active_evidence.notes
+                list_h = self.content_h - 5
+                display_notes = notes[-list_h:] if len(notes) > list_h else notes
+                
+                if display_notes and self.selected_index < len(display_notes):
+                    # Calculate the actual note index in the full list
+                    note_offset = len(notes) - len(display_notes)
+                    actual_note_index = note_offset + self.selected_index
+                    # Open notes view and jump to selected note
+                    self._highlight_note_idx = actual_note_index
+                    self.view_evidence_notes(highlight_note_index=actual_note_index)
+                    delattr(self, '_highlight_note_idx') # Reset filter on view change
             elif self.current_view == "case_detail":
                 if self.active_case:
+                    case_notes = self.active_case.notes
+                    filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
+                    
+                    # Check if a note is selected
+                    if self.selected_index < len(case_notes):
+                        # Open notes view and jump to selected note
+                        self._highlight_note_idx = self.selected_index
+                        self.view_case_notes(highlight_note_index=self.selected_index)
+                        delattr(self, '_highlight_note_idx')
+                    elif self.selected_index - len(case_notes) < len(filtered):
+                        # Evidence selected - open it
+                        evidence_idx = self.selected_index - len(case_notes)
+                        self.active_evidence = filtered[evidence_idx]
+                        self.current_view = "evidence_detail"
+                        self.selected_index = 0
+                        self.scroll_offset = 0
                     case_notes = self.active_case.notes
                     filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
@@ -1668,7 +1748,7 @@ class TUI:
                 win.addstr(y, 2, " " * input_width)
 
                 if line_idx < len(lines):
-                    # Show line content
+                    # Show line content (truncated if too long)
                     display_text = lines[line_idx][:input_width]
                     win.addstr(y, 2, display_text)
 
@@ -1790,6 +1870,18 @@ class TUI:
                 line = lines[cursor_line]
                 lines[cursor_line] = line[:cursor_col] + chr(ch) + line[cursor_col:]
                 cursor_col += 1
+                
+                # Auto-wrap to next line if cursor exceeds visible width
+                if cursor_col >= input_width:
+                    # Always ensure there's a next line to move to
+                    if cursor_line >= len(lines) - 1:
+                        # We're on the last line, add a new line
+                        lines.append("")
+                    cursor_line += 1
+                    cursor_col = 0
+                    # Adjust scroll if needed
+                    if cursor_line >= scroll_offset + input_height:
+                        scroll_offset = cursor_line - input_height + 1
 
     def dialog_confirm(self, message):
         curses.curs_set(0)
@@ -2230,7 +2322,7 @@ class TUI:
                         self.scroll_offset = 0
                         self.show_message("Note deleted.")
 
-    def view_case_notes(self):
+    def view_case_notes(self, highlight_note_index=None):
         if not self.active_case: return
 
         h = int(self.height * 0.8)
@@ -2238,45 +2330,151 @@ class TUI:
         y = int(self.height * 0.1)
         x = int(self.width * 0.1)
 
+        scroll_offset = 0
+        highlight_idx = highlight_note_index  # Store for persistent highlighting
+
         while True:
             win = curses.newwin(h, w, y, x)
+            win.keypad(True)
             win.box()
-            win.addstr(1, 2, f"Notes: {self.active_case.case_number}", curses.A_BOLD)
+            win.addstr(1, 2, f"Notes: {self.active_case.case_number} ({len(self.active_case.notes)} total)", curses.A_BOLD)
 
             notes = self.active_case.notes
-            max_lines = h - 4
+            content_lines = []
+            note_line_ranges = []  # Track which lines belong to which note
+            
+            # Build all content lines with separators between notes
+            for note_idx, note in enumerate(notes):
+                start_line = len(content_lines)
+                timestamp_str = time.ctime(note.timestamp)
+                content_lines.append(f"[{timestamp_str}]")
+                # Split multi-line notes and wrap long lines
+                for line in note.content.split('\n'):
+                    # Wrap long lines
+                    while len(line) > w - 6:
+                        content_lines.append("  " + line[:w-6])
+                        line = line[w-6:]
+                    content_lines.append("  " + line)
+                content_lines.append("")  # Blank line between notes
+                end_line = len(content_lines) - 1
+                note_line_ranges.append((start_line, end_line, note_idx))
 
-            # Scroll last notes
-            display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
+            max_display_lines = h - 5
+            total_lines = len(content_lines)
 
-            for i, note in enumerate(display_notes):
-                # Replace newlines with spaces for single-line display
-                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-                display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
-                # Truncate safely for Unicode
-                display_str = self._safe_truncate(display_str, w - 4)
-                win.addstr(3 + i, 2, display_str)
+            # Jump to highlighted note on first render
+            if highlight_note_index is not None and note_line_ranges:
+                for start, end, idx in note_line_ranges:
+                    if idx == highlight_note_index:
+                        # Center the note in the view
+                        note_middle = (start + end) // 2
+                        scroll_offset = max(0, note_middle - max_display_lines // 2)
+                        highlight_note_index = None  # Only jump once
+                        break
 
-            win.addstr(h-2, 2, "[n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            # Adjust scroll bounds
+            max_scroll = max(0, total_lines - max_display_lines)
+            scroll_offset = max(0, min(scroll_offset, max_scroll))
+
+            # Display lines with highlighting
+            for i in range(max_display_lines):
+                line_idx = scroll_offset + i
+                if line_idx >= total_lines:
+                    break
+                display_line = self._safe_truncate(content_lines[line_idx], w - 4)
+                
+                # Check if this line belongs to the highlighted note
+                is_highlighted = False
+                if highlight_idx is not None:
+                    for start, end, idx in note_line_ranges:
+                        if start <= line_idx <= end and idx == highlight_idx:
+                            is_highlighted = True
+                            break
+                
+                try:
+                    y_pos = 3 + i
+                    if is_highlighted:
+                        # Highlight entire line for selected note
+                        win.addstr(y_pos, 2, display_line, curses.color_pair(1))
+                    else:
+                        # Check for IOCs in the line and highlight them
+                        from .models import Note
+                        iocs_found = Note.extract_iocs_from_text(display_line)
+                        
+                        if iocs_found:
+                            # Display with IOC highlighting
+                            x_pos = 2
+                            remaining = display_line
+                            while iocs_found and remaining:
+                                # Find the earliest IOC in the remaining text
+                                earliest_ioc = None
+                                earliest_pos = len(remaining)
+                                for ioc, _ in iocs_found:
+                                    pos = remaining.find(ioc)
+                                    if pos != -1 and pos < earliest_pos:
+                                        earliest_pos = pos
+                                        earliest_ioc = ioc
+                                
+                                if earliest_ioc:
+                                    # Print text before IOC
+                                    if earliest_pos > 0:
+                                        win.addstr(y_pos, x_pos, remaining[:earliest_pos])
+                                        x_pos += earliest_pos
+                                    # Print IOC in color
+                                    win.addstr(y_pos, x_pos, earliest_ioc, curses.color_pair(4))
+                                    x_pos += len(earliest_ioc)
+                                    # Update remaining text
+                                    remaining = remaining[earliest_pos + len(earliest_ioc):]
+                                    # Remove found IOC from list
+                                    iocs_found = [(ioc, t) for ioc, t in iocs_found if ioc != earliest_ioc]
+                                else:
+                                    break
+                            # Print any remaining text
+                            if remaining:
+                                win.addstr(y_pos, x_pos, remaining)
+                        else:
+                            # No IOCs, display normally
+                            win.addstr(y_pos, 2, display_line)
+                except curses.error:
+                    pass
+
+            # Show scroll indicator
+            if total_lines > max_display_lines:
+                scroll_info = f"[{scroll_offset + 1}-{min(scroll_offset + max_display_lines, total_lines)}/{total_lines}]"
+                try:
+                    win.addstr(2, w - len(scroll_info) - 3, scroll_info, curses.A_DIM)
+                except curses.error:
+                    pass
+
+            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
             win.refresh()
             key = win.getch()
             del win
 
             # Handle key presses
-            if key == ord('n') or key == ord('N'):
+            if key == curses.KEY_UP:
+                scroll_offset = max(0, scroll_offset - 1)
+            elif key == curses.KEY_DOWN:
+                scroll_offset = min(max_scroll, scroll_offset + 1)
+            elif key == curses.KEY_PPAGE:  # Page Up
+                scroll_offset = max(0, scroll_offset - max_display_lines)
+            elif key == curses.KEY_NPAGE:  # Page Down
+                scroll_offset = min(max_scroll, scroll_offset + max_display_lines)
+            elif key == curses.KEY_HOME:
+                scroll_offset = 0
+            elif key == curses.KEY_END:
+                scroll_offset = max_scroll
+            elif key == ord('n') or key == ord('N'):
                 # Save current view and switch to case_detail temporarily for context
                 saved_view = self.current_view
                 self.current_view = "case_detail"
                 self.dialog_add_note()
                 self.current_view = saved_view
-                # Continue loop to refresh with new note
+                scroll_offset = max_scroll  # Jump to bottom to show new note
             elif key == ord('b') or key == ord('B') or key == ord('q') or key == ord('Q') or key == 27:  # 27 is Esc
                 break
-            else:
-                # Any other key also closes (backwards compatibility)
-                break
 
-    def view_evidence_notes(self):
+    def view_evidence_notes(self, highlight_note_index=None):
         if not self.active_evidence: return
 
         h = int(self.height * 0.8)
@@ -2284,42 +2482,148 @@ class TUI:
         y = int(self.height * 0.1)
         x = int(self.width * 0.1)
 
+        scroll_offset = 0
+        highlight_idx = highlight_note_index  # Store for persistent highlighting
+
         while True:
             win = curses.newwin(h, w, y, x)
+            win.keypad(True)
             win.box()
-            win.addstr(1, 2, f"Notes: {self.active_evidence.name}", curses.A_BOLD)
+            win.addstr(1, 2, f"Notes: {self.active_evidence.name} ({len(self.active_evidence.notes)} total)", curses.A_BOLD)
 
             notes = self.active_evidence.notes
-            max_lines = h - 4
+            content_lines = []
+            note_line_ranges = []  # Track which lines belong to which note
+            
+            # Build all content lines with separators between notes
+            for note_idx, note in enumerate(notes):
+                start_line = len(content_lines)
+                timestamp_str = time.ctime(note.timestamp)
+                content_lines.append(f"[{timestamp_str}]")
+                # Split multi-line notes and wrap long lines
+                for line in note.content.split('\n'):
+                    # Wrap long lines
+                    while len(line) > w - 6:
+                        content_lines.append("  " + line[:w-6])
+                        line = line[w-6:]
+                    content_lines.append("  " + line)
+                content_lines.append("")  # Blank line between notes
+                end_line = len(content_lines) - 1
+                note_line_ranges.append((start_line, end_line, note_idx))
 
-            # Scroll last notes
-            display_notes = notes[-max_lines:] if len(notes) > max_lines else notes
+            max_display_lines = h - 5
+            total_lines = len(content_lines)
 
-            for i, note in enumerate(display_notes):
-                # Replace newlines with spaces for single-line display
-                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-                display_str = f"- [{time.ctime(note.timestamp)}] {note_content}"
-                # Truncate safely for Unicode
-                display_str = self._safe_truncate(display_str, w - 4)
-                win.addstr(3 + i, 2, display_str)
+            # Jump to highlighted note on first render
+            if highlight_note_index is not None and note_line_ranges:
+                for start, end, idx in note_line_ranges:
+                    if idx == highlight_note_index:
+                        # Center the note in the view
+                        note_middle = (start + end) // 2
+                        scroll_offset = max(0, note_middle - max_display_lines // 2)
+                        highlight_note_index = None  # Only jump once
+                        break
 
-            win.addstr(h-2, 2, "[n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            # Adjust scroll bounds
+            max_scroll = max(0, total_lines - max_display_lines)
+            scroll_offset = max(0, min(scroll_offset, max_scroll))
+
+            # Display lines with highlighting
+            for i in range(max_display_lines):
+                line_idx = scroll_offset + i
+                if line_idx >= total_lines:
+                    break
+                display_line = self._safe_truncate(content_lines[line_idx], w - 4)
+                
+                # Check if this line belongs to the highlighted note
+                is_highlighted = False
+                if highlight_idx is not None:
+                    for start, end, idx in note_line_ranges:
+                        if start <= line_idx <= end and idx == highlight_idx:
+                            is_highlighted = True
+                            break
+                
+                try:
+                    y_pos = 3 + i
+                    if is_highlighted:
+                        # Highlight entire line for selected note
+                        win.addstr(y_pos, 2, display_line, curses.color_pair(1))
+                    else:
+                        # Check for IOCs in the line and highlight them
+                        from .models import Note
+                        iocs_found = Note.extract_iocs_from_text(display_line)
+                        
+                        if iocs_found:
+                            # Display with IOC highlighting
+                            x_pos = 2
+                            remaining = display_line
+                            while iocs_found and remaining:
+                                # Find the earliest IOC in the remaining text
+                                earliest_ioc = None
+                                earliest_pos = len(remaining)
+                                for ioc, _ in iocs_found:
+                                    pos = remaining.find(ioc)
+                                    if pos != -1 and pos < earliest_pos:
+                                        earliest_pos = pos
+                                        earliest_ioc = ioc
+                                
+                                if earliest_ioc:
+                                    # Print text before IOC
+                                    if earliest_pos > 0:
+                                        win.addstr(y_pos, x_pos, remaining[:earliest_pos])
+                                        x_pos += earliest_pos
+                                    # Print IOC in color
+                                    win.addstr(y_pos, x_pos, earliest_ioc, curses.color_pair(4))
+                                    x_pos += len(earliest_ioc)
+                                    # Update remaining text
+                                    remaining = remaining[earliest_pos + len(earliest_ioc):]
+                                    # Remove found IOC from list
+                                    iocs_found = [(ioc, t) for ioc, t in iocs_found if ioc != earliest_ioc]
+                                else:
+                                    break
+                            # Print any remaining text
+                            if remaining:
+                                win.addstr(y_pos, x_pos, remaining)
+                        else:
+                            # No IOCs, display normally
+                            win.addstr(y_pos, 2, display_line)
+                except curses.error:
+                    pass
+
+            # Show scroll indicator
+            if total_lines > max_display_lines:
+                scroll_info = f"[{scroll_offset + 1}-{min(scroll_offset + max_display_lines, total_lines)}/{total_lines}]"
+                try:
+                    win.addstr(2, w - len(scroll_info) - 3, scroll_info, curses.A_DIM)
+                except curses.error:
+                    pass
+
+            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
             win.refresh()
             key = win.getch()
             del win
 
             # Handle key presses
-            if key == ord('n') or key == ord('N'):
+            if key == curses.KEY_UP:
+                scroll_offset = max(0, scroll_offset - 1)
+            elif key == curses.KEY_DOWN:
+                scroll_offset = min(max_scroll, scroll_offset + 1)
+            elif key == curses.KEY_PPAGE:  # Page Up
+                scroll_offset = max(0, scroll_offset - max_display_lines)
+            elif key == curses.KEY_NPAGE:  # Page Down
+                scroll_offset = min(max_scroll, scroll_offset + max_display_lines)
+            elif key == curses.KEY_HOME:
+                scroll_offset = 0
+            elif key == curses.KEY_END:
+                scroll_offset = max_scroll
+            elif key == ord('n') or key == ord('N'):
                 # Save current view and switch to evidence_detail temporarily for context
                 saved_view = self.current_view
                 self.current_view = "evidence_detail"
                 self.dialog_add_note()
                 self.current_view = saved_view
-                # Continue loop to refresh with new note
+                scroll_offset = max_scroll  # Jump to bottom to show new note
             elif key == ord('b') or key == ord('B') or key == ord('q') or key == ord('Q') or key == 27:  # 27 is Esc
-                break
-            else:
-                # Any other key also closes (backwards compatibility)
                 break
 
     def export_iocs(self):

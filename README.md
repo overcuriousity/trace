@@ -122,7 +122,13 @@ Run `trace` without arguments to open the interface.
     *   IOC counts are displayed in red in case and evidence views.
 *   `a`: **Set Active**. Sets the currently selected Case or Evidence as the global "Active" context.
 *   `d`: Delete the selected Case or Evidence (with confirmation).
-*   `v`: View all notes for the current Case (in Case Detail view).
+*   `v`: **View All Notes**. View all notes for the current Case or Evidence in a scrollable full-screen view.
+    *   **IOC Highlighting**: All IOCs in notes are automatically highlighted in red for immediate visibility.
+    *   **Tag Highlighting**: Hashtags are highlighted in cyan.
+    *   Press `Enter` on any note in case/evidence detail view to jump directly to that note in the full view.
+    *   The selected note will be centered and highlighted.
+    *   Navigate with arrow keys, Page Up/Down, Home/End.
+    *   Press `n` to add a new note without leaving the view.
 *   `/`: Filter list (type to search, `Esc` or `Enter` to exit filter mode).
 *   `s`: Settings menu (in Case List view).
 *   `Esc`: Cancel during input dialogs.

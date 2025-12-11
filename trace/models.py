@@ -96,6 +96,71 @@ class Note:
         data = f"{self.timestamp}:{self.content}".encode('utf-8')
         self.content_hash = hashlib.sha256(data).hexdigest()
 
+    @staticmethod
+    def extract_iocs_from_text(text):
+        """Extract IOCs from text and return as list of (ioc, type) tuples"""
+        iocs = []
+        seen = set()
+
+        # IPv4 addresses
+        ipv4_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+        for match in re.findall(ipv4_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'ipv4'))
+
+        # IPv6 addresses (simplified)
+        ipv6_pattern = r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b'
+        for match in re.findall(ipv6_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'ipv6'))
+
+        # URLs (check before domains to avoid double-matching)
+        url_pattern = r'https?://[^\s]+'
+        for match in re.findall(url_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'url'))
+
+        # Domain names (basic pattern)
+        domain_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+        for match in re.findall(domain_pattern, text):
+            # Filter out common false positives and already seen URLs
+            if match not in seen and not match.startswith('example.'):
+                seen.add(match)
+                iocs.append((match, 'domain'))
+
+        # SHA256 hashes (64 hex chars) - check before SHA1 and MD5
+        sha256_pattern = r'\b[a-fA-F0-9]{64}\b'
+        for match in re.findall(sha256_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'sha256'))
+
+        # SHA1 hashes (40 hex chars) - check before MD5
+        sha1_pattern = r'\b[a-fA-F0-9]{40}\b'
+        for match in re.findall(sha1_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'sha1'))
+
+        # MD5 hashes (32 hex chars)
+        md5_pattern = r'\b[a-fA-F0-9]{32}\b'
+        for match in re.findall(md5_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'md5'))
+
+        # Email addresses
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        for match in re.findall(email_pattern, text):
+            if match not in seen:
+                seen.add(match)
+                iocs.append((match, 'email'))
+
+        return iocs
+
     def to_dict(self):
         return {
             "note_id": self.note_id,
