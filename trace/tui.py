@@ -1391,21 +1391,21 @@ class TUI:
             case_notes = self.active_case.notes
             filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
-            # Only allow setting active for evidence, not notes
-            if self.selected_index < len(case_notes):
+            # Evidence is displayed first (indices 0 to len(evidence)-1)
+            # Case notes are displayed second (indices len(evidence) to len(evidence)+len(notes)-1)
+            if self.selected_index < len(filtered):
+                # Selected evidence - set it as active
+                ev = filtered[self.selected_index]
+                self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=ev.evidence_id)
+                self.global_active_case_id = self.active_case.case_id
+                self.global_active_evidence_id = ev.evidence_id
+                self.show_message(f"Active: {ev.name}")
+            elif case_notes and self.selected_index - len(filtered) < len(case_notes):
                 # Selected a note - set case as active (not evidence)
                 self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=None)
                 self.global_active_case_id = self.active_case.case_id
                 self.global_active_evidence_id = None
                 self.show_message(f"Active: Case {self.active_case.case_number}")
-            elif filtered and self.selected_index - len(case_notes) < len(filtered):
-                # Selected evidence - set it as active
-                evidence_idx = self.selected_index - len(case_notes)
-                ev = filtered[evidence_idx]
-                self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=ev.evidence_id)
-                self.global_active_case_id = self.active_case.case_id
-                self.global_active_evidence_id = ev.evidence_id
-                self.show_message(f"Active: {ev.name}")
             else:
                 # Nothing selected - set case as active
                 self.state_manager.set_active(case_id=self.active_case.case_id, evidence_id=None)
@@ -1833,7 +1833,7 @@ class TUI:
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
-        win.keypad(1)  # Enable keypad mode for arrow keys
+        win.keypad(True)  # Enable keypad mode for arrow keys
 
         while True:
             win.clear()
@@ -1930,7 +1930,7 @@ class TUI:
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
-        win.keypad(1)  # Enable keypad mode for arrow keys
+        win.keypad(True)  # Enable keypad mode for arrow keys
         scroll_offset = 0
 
         while True:
@@ -2073,12 +2073,12 @@ class TUI:
 
         if self.current_view == "evidence_detail" and self.active_evidence:
             context_title = f"Add Note → Evidence: {self.active_evidence.name}"
-            context_prompt = f"Case: {self.active_case.case_number if self.active_case else '?'}\nEvidence: {self.active_evidence.name}\n\nNote will be added to this evidence."
+            context_prompt = f"Case: {self.active_case.case_number if self.active_case else '?'}\nEvidence: {self.active_evidence.name}\n"
             recent_notes = self.active_evidence.notes[-5:] if len(self.active_evidence.notes) > 0 else []
             target_evidence = self.active_evidence
         elif self.current_view == "case_detail" and self.active_case:
             context_title = f"Add Note → Case: {self.active_case.case_number}"
-            context_prompt = f"Case: {self.active_case.case_number}\n{self.active_case.name if self.active_case.name else ''}\n\nNote will be added to case notes."
+            context_prompt = f"Case: {self.active_case.case_number}\n{self.active_case.name if self.active_case.name else ''}\nNote will be added to case notes."
             recent_notes = self.active_case.notes[-5:] if len(self.active_case.notes) > 0 else []
             target_case = self.active_case
         elif self.current_view == "case_list":
@@ -2091,14 +2091,14 @@ class TUI:
                         for ev in active_case.evidence:
                             if ev.evidence_id == self.global_active_evidence_id:
                                 context_title = f"Add Note → Evidence: {ev.name}"
-                                context_prompt = f"Case: {active_case.case_number}\nEvidence: {ev.name}\n\nNote will be added to this evidence."
+                                context_prompt = f"Case: {active_case.case_number}\nEvidence: {ev.name}\n"
                                 recent_notes = ev.notes[-5:] if len(ev.notes) > 0 else []
                                 target_case = active_case
                                 target_evidence = ev
                                 break
                     else:
                         context_title = f"Add Note → Case: {active_case.case_number}"
-                        context_prompt = f"Case: {active_case.case_number}\n\nNote will be added to case notes."
+                        context_prompt = f"Case: {active_case.case_number}\nNote will be added to case notes."
                         recent_notes = active_case.notes[-5:] if len(active_case.notes) > 0 else []
                         target_case = active_case
 
@@ -2131,7 +2131,7 @@ class TUI:
 
         signed = False
         if pgp_enabled:
-            sig = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id)
+            sig = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id or "")
             if sig:
                 note.signature = sig
                 signed = True

@@ -23,7 +23,6 @@ class Storage:
 
     def _create_demo_case(self):
         """Create a demo case with evidence showcasing all features"""
-        # Create demo case
         demo_case = Case(
             case_number="DEMO-2024-001",
             name="Sample Investigation",
