@@ -27,14 +27,14 @@ jobs:
     
     - name: Build Linux binary
       run: |
-        pyinstaller --onefile --name trace-linux main.py
+        pyinstaller --onefile --name trace main.py
     
     - name: Upload Linux binary to release
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: ./dist/trace-linux
+        files: ./dist/trace
 
   build-windows:
     runs-on: windows-latest
@@ -55,11 +55,11 @@ jobs:
     
     - name: Build Windows executable
       run: |
-        pyinstaller --onefile --name trace-windows main.py
+        pyinstaller --onefile --name trace main.py
     
     - name: Upload Windows executable to release
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: ./dist/trace-windows.exe
+        files: ./dist/trace.exe
