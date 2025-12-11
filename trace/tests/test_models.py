@@ -1,7 +1,6 @@
 import unittest
 import shutil
 import tempfile
-import json
 from pathlib import Path
 from trace.models import Note, Case, Evidence
 from trace.storage import Storage, StateManager

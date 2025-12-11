@@ -40,7 +40,8 @@ def quick_add_note(content: str):
 
     # Try signing if enabled
     if settings.get("pgp_enabled", True):
-        signature = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}")
+        gpg_key_id = settings.get("gpg_key_id", None)
+        signature = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id)
         if signature:
             note.signature = signature
         else:

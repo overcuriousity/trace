@@ -3,16 +3,69 @@ import hashlib
 
 class Crypto:
     @staticmethod
-    def sign_content(content: str) -> str:
+    def list_gpg_keys():
         """
-        Signs the content using GPG.
-        Returns the clearsigned content or None if GPG fails.
+        List available GPG secret keys.
+        Returns a list of tuples: (key_id, user_id)
         """
         try:
-            # We use --clearsign so the signature is attached to the text in a readable format
-            # We assume a default key is available or configured.
             proc = subprocess.Popen(
-                ['gpg', '--clearsign', '--output', '-'],
+                ['gpg', '--list-secret-keys', '--with-colons'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate()
+
+            if proc.returncode != 0:
+                return []
+
+            keys = []
+            current_key_id = None
+
+            for line in stdout.split('\n'):
+                fields = line.split(':')
+                if len(fields) < 2:
+                    continue
+
+                # sec = secret key
+                if fields[0] == 'sec':
+                    # Key ID is in field 4 (short) or we can extract from field 5 (fingerprint)
+                    current_key_id = fields[4] if len(fields) > 4 else None
+
+                # uid = user ID
+                elif fields[0] == 'uid' and current_key_id:
+                    user_id = fields[9] if len(fields) > 9 else "Unknown"
+                    keys.append((current_key_id, user_id))
+                    current_key_id = None  # Reset after matching
+
+            return keys
+
+        except FileNotFoundError:
+            return []  # GPG not installed
+
+    @staticmethod
+    def sign_content(content: str, key_id: str = None) -> str:
+        """
+        Signs the content using GPG.
+
+        Args:
+            content: The content to sign
+            key_id: Optional GPG key ID to use. If None, uses default key.
+
+        Returns:
+            The clearsigned content or empty string if GPG fails.
+        """
+        try:
+            # Build command
+            cmd = ['gpg', '--clearsign', '--output', '-']
+
+            # Add specific key if provided
+            if key_id:
+                cmd.extend(['--local-user', key_id])
+
+            proc = subprocess.Popen(
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

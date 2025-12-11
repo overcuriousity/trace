@@ -1,5 +1,4 @@
 import curses
-import curses.textpad
 import time
 from typing import Optional, List
 from .models import Case, Evidence, Note
@@ -10,7 +9,7 @@ class TUI:
         self.stdscr = stdscr
         self.storage = Storage()
         self.state_manager = StateManager()
-        self.current_view = "case_list"  # case_list, case_detail, evidence_detail, tags_list, tag_notes_list, note_detail, ioc_list, ioc_notes_list
+        self.current_view = "case_list"  # case_list, case_detail, evidence_detail, tags_list, tag_notes_list, note_detail, ioc_list, ioc_notes_list, help
         self.selected_index = 0
         self.scroll_offset = 0 # Index of the first item to display
         self.cases = self.storage.cases
@@ -42,10 +41,22 @@ class TUI:
         curses.curs_set(0) # Hide cursor
         curses.start_color()
         if curses.has_colors():
-            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN) # Highlight
-            curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK) # Success / Active
-            curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK) # Warning / Info
-            curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK) # Error
+            # Selection / Highlight
+            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
+            # Success / Active indicators
+            curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+            # Info / Warnings
+            curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+            # Errors / Critical / IOCs
+            curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
+            # Headers / Titles (bright cyan)
+            curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
+            # Metadata / Secondary text (dim)
+            curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
+            # Borders / Separators (blue)
+            curses.init_pair(7, curses.COLOR_BLUE, curses.COLOR_BLACK)
+            # Tags (magenta)
+            curses.init_pair(8, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
         self.height, self.width = stdscr.getmaxyx()
 
@@ -82,6 +93,8 @@ class TUI:
                 self.draw_ioc_notes_list()
             elif self.current_view == "note_detail":
                 self.draw_note_detail()
+            elif self.current_view == "help":
+                self.draw_help()
 
             self.stdscr.refresh()
 
@@ -245,12 +258,31 @@ class TUI:
         return ellipsis[:max_width]
 
     def draw_header(self):
-        title = " trace - Forensic Notes "
-        self.stdscr.attron(curses.color_pair(1))
-        self.stdscr.addstr(0, 0, title)
-        if self.width > len(title):
-            self.stdscr.addstr(0, len(title), " " * (self.width - len(title)))
-        self.stdscr.attroff(curses.color_pair(1))
+        # Modern header with icon and better styling
+        title = "◆ trace"
+        subtitle = "Forensic Investigation Notes"
+
+        # Top border line
+        try:
+            self.stdscr.attron(curses.color_pair(7))
+            self.stdscr.addstr(0, 0, "─" * self.width)
+            self.stdscr.attroff(curses.color_pair(7))
+        except curses.error:
+            pass
+
+        # Title line with gradient effect
+        try:
+            # Icon and main title
+            self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(0, 2, title)
+            self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+
+            # Subtitle
+            self.stdscr.attron(curses.color_pair(6))
+            self.stdscr.addstr(0, 2 + len(title) + 2, subtitle)
+            self.stdscr.attroff(curses.color_pair(6))
+        except curses.error:
+            pass
 
     def draw_status_bar(self):
         # Determine status text
@@ -258,38 +290,54 @@ class TUI:
         attr = curses.color_pair(1)
 
         # Check for flash message (display for 3 seconds)
+        icon = ""
         if self.flash_message and (time.time() - self.flash_time < 3):
-            status_text = f" {self.flash_message} "
             if "Failed" in self.flash_message or "Error" in self.flash_message:
-                attr = curses.color_pair(4) # Red
+                icon = "✗"
+                attr = curses.color_pair(4)  # Red
             else:
-                attr = curses.color_pair(2) # Green
+                icon = "✓"
+                attr = curses.color_pair(2)  # Green
+            status_text = f"{icon} {self.flash_message}"
         elif self.filter_mode:
-            status_text = f"FILTER: {self.filter_query}"
+            icon = "◈"
+            status_text = f"{icon} Filter: {self.filter_query}"
             attr = curses.color_pair(3)
         else:
-            status_text = "Active Context: None"
+            # Active context display
             if self.global_active_case_id:
                 c = self.storage.get_case(self.global_active_case_id)
                 if c:
-                    status_text = f"Active Case: {c.case_number}"
+                    icon = "●"
+                    status_text = f"{icon} {c.case_number}"
+                    attr = curses.color_pair(2)  # Green for active
                     if self.global_active_evidence_id:
-                        # Find evidence name
                         _, ev = self.storage.find_evidence(self.global_active_evidence_id)
                         if ev:
-                            status_text += f" | Ev: {ev.name}"
+                            status_text += f"  ▸  {ev.name}"
+            else:
+                icon = "○"
+                status_text = f"{icon} No active context"
+                attr = curses.color_pair(6) | curses.A_DIM
 
         # Truncate if too long
-        if len(status_text) > self.width:
-            status_text = status_text[:self.width-1]
+        max_status_len = self.width - 2
+        if len(status_text) > max_status_len:
+            status_text = status_text[:max_status_len-1] + "…"
 
-        # Bottom line
+        # Bottom line with border
         try:
+            # Border line above status
+            self.stdscr.attron(curses.color_pair(7))
+            self.stdscr.addstr(self.height - 2, 0, "─" * self.width)
+            self.stdscr.attroff(curses.color_pair(7))
+
+            # Status text
             self.stdscr.attron(attr)
-            self.stdscr.addstr(self.height - 1, 0, status_text)
-            remaining = self.width - len(status_text) - 1
+            self.stdscr.addstr(self.height - 1, 1, status_text)
+            remaining = self.width - len(status_text) - 2
             if remaining > 0:
-                self.stdscr.addstr(self.height - 1, len(status_text), " " * remaining)
+                self.stdscr.addstr(self.height - 1, len(status_text) + 1, " " * remaining)
             self.stdscr.attroff(attr)
         except curses.error:
             pass # Ignore bottom-right corner write errors
@@ -321,14 +369,25 @@ class TUI:
         return filtered
 
     def draw_case_list(self):
-        self.stdscr.addstr(2, 2, "Cases:", curses.A_BOLD)
+        # Header with icon
+        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.addstr(2, 2, "■ Cases")
+        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
 
         if not self.cases:
-            self.stdscr.addstr(4, 4, "No cases found. Press 'N' to create one.", curses.color_pair(3))
+            self.stdscr.attron(curses.color_pair(3))
+            self.stdscr.addstr(4, 4, "┌─ No cases found")
+            self.stdscr.addstr(5, 4, "└─ Press 'N' to create your first case")
+            self.stdscr.attroff(curses.color_pair(3))
             self.stdscr.addstr(self.height - 3, 2, "[N] New Case  [q] Quit", curses.color_pair(3))
             return
 
         display_cases = self._get_filtered_list(self.cases, "case_number", "name")
+
+        # Show count
+        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.addstr(2, 12, f"({len(display_cases)} total)")
+        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
 
         list_h = self._update_scroll(len(display_cases))
 
@@ -350,42 +409,107 @@ class TUI:
             all_tags = self._get_all_tags_with_counts(all_notes)
             tag_count = len(all_tags)
 
-            prefix = "[x] " if case.case_id == self.global_active_case_id and not self.global_active_evidence_id else "[ ] "
-            note_indicator = f" ({total_notes} notes" if total_notes > 0 else ""
-            tag_indicator = f", {tag_count} tags)" if tag_count > 0 and total_notes > 0 else ")" if total_notes > 0 else ""
-            display_str = f"{prefix}{case.case_number} - {case.name}{note_indicator}{tag_indicator}"
+            # Active indicator with better icon
+            is_active = case.case_id == self.global_active_case_id and not self.global_active_evidence_id
+            prefix = "● " if is_active else "○ "
+
+            # Build display string
+            display_str = f"{prefix}{case.case_number}"
+            if case.name:
+                display_str += f"  │  {case.name}"
+
+            # Metadata indicators with icons
+            metadata = []
+            if len(case.evidence) > 0:
+                metadata.append(f"▪ {len(case.evidence)} ev")
+            if total_notes > 0:
+                metadata.append(f"◆ {total_notes}")
+            if tag_count > 0:
+                metadata.append(f"# {tag_count}")
+
+            if metadata:
+                display_str += "  │  " + "  ".join(metadata)
+
             # Truncate safely for Unicode
             display_str = self._safe_truncate(display_str, self.width - 6)
 
             if idx == self.selected_index:
+                # Highlighted selection
                 self.stdscr.attron(curses.color_pair(1))
                 self.stdscr.addstr(y, 4, display_str)
                 self.stdscr.attroff(curses.color_pair(1))
             else:
-                self.stdscr.addstr(y, 4, display_str)
+                # Normal item - color the active indicator if active
+                if is_active:
+                    self.stdscr.attron(curses.color_pair(2) | curses.A_BOLD)
+                    self.stdscr.addstr(y, 4, prefix)
+                    self.stdscr.attroff(curses.color_pair(2) | curses.A_BOLD)
+                    # Rest of line in normal color
+                    self.stdscr.addstr(display_str[len(prefix):])
+                else:
+                    self.stdscr.addstr(y, 4, display_str)
 
         if not display_cases and self.cases:
-            self.stdscr.addstr(4, 4, "No cases match filter.")
+            self.stdscr.attron(curses.color_pair(3))
+            self.stdscr.addstr(4, 4, "┌─ No cases match filter")
+            self.stdscr.addstr(5, 4, "└─ Press ESC to clear filter")
+            self.stdscr.attroff(curses.color_pair(3))
 
-        self.stdscr.addstr(self.height - 3, 2, "[N] New Case  [n] Add Note  [Enter] Select  [a] Active  [d] Delete  [/] Filter  [s] Settings", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[N] New Case  [n] Add Note  [Enter] Select  [a] Active  [d] Delete  [/] Filter  [s] Settings  [?] Help", curses.color_pair(3))
 
     def draw_case_detail(self):
         if not self.active_case: return
 
         case_note_count = len(self.active_case.notes)
-        case_note_info = f" ({case_note_count} case notes)" if case_note_count > 0 else " (no case notes)"
 
-        self.stdscr.addstr(2, 2, f"Case: {self.active_case.case_number}{case_note_info}", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, f"Inv: {self.active_case.investigator}")
-        self.stdscr.addstr(4, 2, f"ID: {self.active_case.case_id}")
+        # Header with case info
+        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.addstr(2, 2, f"■ {self.active_case.case_number}")
+        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
 
-        self.stdscr.addstr(6, 2, "Evidence:", curses.A_UNDERLINE)
+        if self.active_case.name:
+            self.stdscr.attron(curses.color_pair(6))
+            self.stdscr.addstr(f"  │  {self.active_case.name}")
+            self.stdscr.attroff(curses.color_pair(6))
+
+        # Metadata section
+        y_pos = 3
+        if self.active_case.investigator:
+            self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.addstr(y_pos, 4, f"◆ Investigator:")
+            self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.addstr(f" {self.active_case.investigator}")
+            y_pos += 1
+
+        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.addstr(y_pos, 4, f"◆ Case Notes:")
+        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+        note_color = curses.color_pair(2) if case_note_count > 0 else curses.color_pair(6)
+        self.stdscr.attron(note_color)
+        self.stdscr.addstr(f" {case_note_count}")
+        self.stdscr.attroff(note_color)
+        y_pos += 1
+
+        # Evidence section header
+        y_pos += 1
+        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.addstr(y_pos, 2, "▪ Evidence")
+        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
 
         evidence_list = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
+        # Show count
+        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.addstr(y_pos, 14, f"({len(evidence_list)} items)")
+        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+
+        y_pos += 1
+
         if not evidence_list:
-             self.stdscr.addstr(7, 4, "No evidence.")
-             # Continue to draw navigation footer
+            self.stdscr.attron(curses.color_pair(3))
+            self.stdscr.addstr(y_pos + 1, 4, "┌─ No evidence items")
+            self.stdscr.addstr(y_pos + 2, 4, "└─ Press 'N' to add evidence")
+            self.stdscr.attroff(curses.color_pair(3))
         else:
             # Scrolling for evidence list
             # List starts at y=7
@@ -399,7 +523,7 @@ class TUI:
                 if idx >= len(evidence_list): break
 
                 ev = evidence_list[idx]
-                y = 7 + i
+                y = y_pos + 2 + i
 
                 note_count = len(ev.notes)
 
@@ -411,50 +535,68 @@ class TUI:
                 ev_iocs = self._get_all_iocs_with_counts(ev.notes)
                 ioc_count = len(ev_iocs)
 
-                prefix = "[x] " if ev.evidence_id == self.global_active_evidence_id else "[ ] "
-                note_indicator = f" ({note_count} notes" if note_count > 0 else ""
-                tag_indicator = f", {tag_count} tags" if tag_count > 0 and note_count > 0 else ""
-                ioc_indicator = f", {ioc_count} IOCs)" if ioc_count > 0 and note_count > 0 else ")" if note_count > 0 else ""
+                # Active indicator
+                is_active = ev.evidence_id == self.global_active_evidence_id
+                prefix = "● " if is_active else "○ "
+
+                # Build display string
+                display_str = f"{prefix}{ev.name}"
+
+                # Metadata with icons
+                metadata = []
+                if note_count > 0:
+                    metadata.append(f"◆ {note_count}")
+                if tag_count > 0:
+                    metadata.append(f"# {tag_count}")
+                if ioc_count > 0:
+                    metadata.append(f"⚠ {ioc_count}")
 
                 # Add hash indicator if source hash exists
-                hash_indicator = ""
                 source_hash = ev.metadata.get("source_hash")
                 if source_hash:
-                    # Show first 8 chars of hash for quick reference
-                    hash_preview = source_hash[:8] + "..." if len(source_hash) > 8 else source_hash
-                    hash_indicator = f" [H:{hash_preview}]"
+                    hash_preview = source_hash[:6] + "…"
+                    metadata.append(f"⌗ {hash_preview}")
 
-                # Build display with IOC indicator in red if present
-                if ioc_count > 0:
-                    base_display = f"{prefix}{ev.name}{note_indicator}{tag_indicator}"
-                    # Truncate base_display to leave room for IOC indicator
-                    ioc_text = f", {ioc_count} IOCs)"
-                    max_base_len = self.width - 6 - len(ioc_text)
-                    base_display = self._safe_truncate(base_display, max_base_len)
-                else:
-                    base_display = f"{prefix}{ev.name}{note_indicator}{tag_indicator}{ioc_indicator}{hash_indicator}"
-                    base_display = self._safe_truncate(base_display, self.width - 6)
+                if metadata:
+                    display_str += "  │  " + "  ".join(metadata)
+
+                # Truncate safely
+                base_display = self._safe_truncate(display_str, self.width - 6)
 
                 if idx == self.selected_index:
+                    # Highlighted selection
                     self.stdscr.attron(curses.color_pair(1))
                     self.stdscr.addstr(y, 4, base_display)
-                    if ioc_count > 0:
-                        # Add IOC indicator in red
-                        self.stdscr.attroff(curses.color_pair(1))
-                        self.stdscr.attron(curses.color_pair(4))
-                        self.stdscr.addstr(ioc_text)
-                        self.stdscr.attroff(curses.color_pair(4))
-                    else:
-                        self.stdscr.attroff(curses.color_pair(1))
+                    self.stdscr.attroff(curses.color_pair(1))
                 else:
-                    self.stdscr.addstr(y, 4, base_display)
-                    if ioc_count > 0:
-                        # Add IOC indicator in red
-                        self.stdscr.attron(curses.color_pair(4))
-                        self.stdscr.addstr(ioc_text)
-                        self.stdscr.attroff(curses.color_pair(4))
+                    # Normal item - highlight active indicator if active
+                    if is_active:
+                        self.stdscr.attron(curses.color_pair(2) | curses.A_BOLD)
+                        self.stdscr.addstr(y, 4, prefix)
+                        self.stdscr.attroff(curses.color_pair(2) | curses.A_BOLD)
+                        # Rest in normal, but highlight IOC warning in red
+                        rest_of_line = base_display[len(prefix):]
+                        if ioc_count > 0 and "⚠" in rest_of_line:
+                            # Split and color the IOC part
+                            parts = rest_of_line.split("⚠")
+                            self.stdscr.addstr(parts[0])
+                            self.stdscr.attron(curses.color_pair(4))
+                            self.stdscr.addstr("⚠" + parts[1])
+                            self.stdscr.attroff(curses.color_pair(4))
+                        else:
+                            self.stdscr.addstr(rest_of_line)
+                    else:
+                        # Not active - still highlight IOC warning
+                        if ioc_count > 0 and "⚠" in base_display:
+                            parts = base_display.split("⚠")
+                            self.stdscr.addstr(y, 4, parts[0])
+                            self.stdscr.attron(curses.color_pair(4))
+                            self.stdscr.addstr("⚠" + parts[1])
+                            self.stdscr.attroff(curses.color_pair(4))
+                        else:
+                            self.stdscr.addstr(y, 4, base_display)
 
-        self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [b] Back  [a] Active  [d] Delete  [/] Filter", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
 
     def draw_evidence_detail(self):
         if not self.active_evidence: return
@@ -518,7 +660,7 @@ class TUI:
             else:
                 self.stdscr.addstr(start_y + i, 4, display_str)
 
-        self.stdscr.addstr(self.height - 3, 2, "[n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [b] Back  [a] Active  [d] Delete Note", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete Note  [?] Help", curses.color_pair(3))
 
     def draw_tags_list(self):
         """Draw the tags list view showing all tags sorted by occurrence count"""
@@ -742,11 +884,180 @@ class TUI:
 
         self.stdscr.addstr(self.height - 3, 2, "[b] Back", curses.color_pair(3))
 
+    def draw_help(self):
+        """Draw the help screen with keyboard shortcuts and features"""
+        self.stdscr.addstr(2, 2, "trace - Help & Keyboard Shortcuts", curses.A_BOLD)
+        self.stdscr.addstr(3, 2, "═" * (self.width - 4))
+
+        # Build help content as a list of lines
+        help_lines = []
+
+        # General Navigation
+        help_lines.append(("GENERAL NAVIGATION", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Arrow Keys       Navigate lists and menus", curses.A_NORMAL))
+        help_lines.append(("  Enter            Select item / Open", curses.A_NORMAL))
+        help_lines.append(("  b                Go back to previous view", curses.A_NORMAL))
+        help_lines.append(("  q                Quit application", curses.A_NORMAL))
+        help_lines.append(("  ?  or  h         Show this help screen", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Case List View
+        help_lines.append(("CASE LIST VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  N                Create new case", curses.A_NORMAL))
+        help_lines.append(("  n                Add note to active context", curses.A_NORMAL))
+        help_lines.append(("  a                Set selected case as active", curses.A_NORMAL))
+        help_lines.append(("  d                Delete selected case (with confirmation)", curses.A_NORMAL))
+        help_lines.append(("  /                Filter cases by case number or name", curses.A_NORMAL))
+        help_lines.append(("  s                Open settings menu", curses.A_NORMAL))
+        help_lines.append(("  Enter            Open case details", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Case Detail View
+        help_lines.append(("CASE DETAIL VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  N                Create new evidence item", curses.A_NORMAL))
+        help_lines.append(("  n                Add note to case", curses.A_NORMAL))
+        help_lines.append(("  t                View tags across case and all evidence", curses.A_NORMAL))
+        help_lines.append(("  i                View IOCs across case and all evidence", curses.A_NORMAL))
+        help_lines.append(("  v                View all case notes", curses.A_NORMAL))
+        help_lines.append(("  a                Set case (or selected evidence) as active", curses.A_NORMAL))
+        help_lines.append(("  d                Delete selected evidence item", curses.A_NORMAL))
+        help_lines.append(("  /                Filter evidence by name or description", curses.A_NORMAL))
+        help_lines.append(("  Enter            Open evidence details", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Evidence Detail View
+        help_lines.append(("EVIDENCE DETAIL VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  n                Add note to evidence", curses.A_NORMAL))
+        help_lines.append(("  t                View tags for this evidence", curses.A_NORMAL))
+        help_lines.append(("  i                View IOCs for this evidence", curses.A_NORMAL))
+        help_lines.append(("  v                View all evidence notes", curses.A_NORMAL))
+        help_lines.append(("  a                Set evidence as active context", curses.A_NORMAL))
+        help_lines.append(("  d                Delete selected note", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Tags View
+        help_lines.append(("TAGS VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Enter            View all notes with selected tag", curses.A_NORMAL))
+        help_lines.append(("  b                Return to previous view", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # IOCs View
+        help_lines.append(("IOCs VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Enter            View all notes containing selected IOC", curses.A_NORMAL))
+        help_lines.append(("  e                Export IOCs to text file", curses.A_NORMAL))
+        help_lines.append(("  b                Return to previous view", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Note Editor
+        help_lines.append(("NOTE EDITOR", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Arrow Keys       Navigate within text", curses.A_NORMAL))
+        help_lines.append(("  Enter            New line (multi-line notes supported)", curses.A_NORMAL))
+        help_lines.append(("  Backspace        Delete character", curses.A_NORMAL))
+        help_lines.append(("  Ctrl+G           Submit note", curses.A_NORMAL))
+        help_lines.append(("  Esc              Cancel note creation", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Features
+        help_lines.append(("FEATURES", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Active Context   Set with 'a' key - enables CLI quick notes", curses.A_NORMAL))
+        help_lines.append(("                   Run: trace \"your note text\"", curses.A_DIM))
+        help_lines.append(("  Tags             Use #hashtag in notes for auto-tagging", curses.A_NORMAL))
+        help_lines.append(("  IOCs             Auto-extracts IPs, domains, URLs, hashes, emails", curses.A_NORMAL))
+        help_lines.append(("  Integrity        All notes SHA256 hashed + optional GPG signing", curses.A_NORMAL))
+        help_lines.append(("  GPG Settings     Press 's' to toggle signing & select GPG key", curses.A_NORMAL))
+        help_lines.append(("  Source Hash      Store evidence file hashes for chain of custody", curses.A_NORMAL))
+        help_lines.append(("  Export           Run: trace --export --output report.md", curses.A_DIM))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Data Location
+        help_lines.append(("DATA STORAGE", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  All data:        ~/.trace/data.json", curses.A_NORMAL))
+        help_lines.append(("  Active context:  ~/.trace/state", curses.A_NORMAL))
+        help_lines.append(("  Settings:        ~/.trace/settings.json", curses.A_NORMAL))
+        help_lines.append(("  IOC exports:     ~/.trace/exports/", curses.A_NORMAL))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Demo Case Note
+        help_lines.append(("GETTING STARTED", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Demo Case        A sample case (DEMO-2024-001) showcases all features", curses.A_NORMAL))
+        help_lines.append(("                   Explore evidence, notes, tags, and IOCs", curses.A_DIM))
+        help_lines.append(("                   Delete it when ready: select and press 'd'", curses.A_DIM))
+
+        # Calculate scrolling
+        total_lines = len(help_lines)
+        list_h = self.content_h - 2  # Account for header
+
+        # Update scroll based on selection (treat as line navigation)
+        if self.selected_index < self.scroll_offset:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= self.scroll_offset + list_h:
+            self.scroll_offset = self.selected_index - list_h + 1
+
+        # Ensure scroll_offset is within bounds
+        max_scroll = max(0, total_lines - list_h)
+        if self.scroll_offset > max_scroll:
+            self.scroll_offset = max_scroll
+        if self.scroll_offset < 0:
+            self.scroll_offset = 0
+
+        # Draw visible help lines
+        y_offset = 5
+        for i in range(list_h):
+            line_idx = self.scroll_offset + i
+            if line_idx >= total_lines:
+                break
+
+            text, attr = help_lines[line_idx]
+            y = y_offset + i
+
+            if y >= self.height - 3:
+                break
+
+            # Truncate if needed
+            display_text = self._safe_truncate(text, self.width - 4)
+
+            try:
+                self.stdscr.addstr(y, 2, display_text, attr)
+            except curses.error:
+                pass  # Ignore display errors at screen boundaries
+
+        # Show scroll indicator if content doesn't fit
+        if total_lines > list_h:
+            scroll_info = f"[{self.scroll_offset + 1}-{min(self.scroll_offset + list_h, total_lines)} of {total_lines}]"
+            try:
+                self.stdscr.addstr(self.height - 3, self.width - len(scroll_info) - 2, scroll_info, curses.color_pair(3))
+            except curses.error:
+                pass
+
+        self.stdscr.addstr(self.height - 3, 2, "[Arrow Keys] Scroll  [b/q/?] Close", curses.color_pair(3))
+
     def handle_input(self, key):
         if self.filter_mode:
             return self.handle_filter_input(key)
 
-        if key == ord('q'): return False
+        # Help screen - accessible from anywhere
+        if key == ord('?') or key == ord('h'):
+            # Save previous view to return to it
+            if not hasattr(self, 'previous_view'):
+                self.previous_view = self.current_view
+            else:
+                # If already in help, don't update previous_view
+                if self.current_view != "help":
+                    self.previous_view = self.current_view
+
+            self.current_view = "help"
+            self.selected_index = 0
+            self.scroll_offset = 0
+            return True
+
+        if key == ord('q'):
+            # If in help view, just close help instead of quitting
+            if self.current_view == "help":
+                self.current_view = getattr(self, 'previous_view', 'case_list')
+                self.selected_index = 0
+                self.scroll_offset = 0
+                return True
+            return False
 
         # Filter toggle
         if key == ord('/'):
@@ -757,6 +1068,11 @@ class TUI:
 
         # Navigation
         if key == curses.KEY_UP:
+            if self.current_view == "help":
+                # Scrolling help content
+                if self.selected_index > 0:
+                    self.selected_index -= 1
+                return True
             if self.selected_index > 0:
                 self.selected_index -= 1
         elif key == curses.KEY_DOWN:
@@ -779,6 +1095,14 @@ class TUI:
                 max_idx = len(self.current_iocs) - 1
             elif self.current_view == "ioc_notes_list":
                 max_idx = len(self.ioc_notes) - 1
+            elif self.current_view == "help":
+                # Scrolling help content - just increment scroll_offset directly
+                # Help view uses scroll_offset for scrolling, not selected_index
+                list_h = self.content_h - 2
+                # We'll increment selected_index but it's just used for scroll calculation
+                max_idx = 100  # Arbitrary large number for help content
+                self.selected_index += 1
+                return True
 
             if max_idx < 0: max_idx = 0 # Handle empty list
             if self.selected_index < max_idx:
@@ -845,7 +1169,12 @@ class TUI:
 
         # Back
         elif key == ord('b'):
-            if self.current_view == "note_detail":
+            if self.current_view == "help":
+                # Return to previous view
+                self.current_view = getattr(self, 'previous_view', 'case_list')
+                self.selected_index = 0
+                self.scroll_offset = 0
+            elif self.current_view == "note_detail":
                 self.current_view = "tag_notes_list"
                 self.current_note = None
                 self.selected_index = 0
@@ -982,7 +1311,11 @@ class TUI:
             self.show_message(f"Active: {self.active_evidence.name}")
 
     def _input_dialog(self, title, prompt=""):
-        curses.noecho() # Fix: Ensure echo is off before using Textbox, as Textbox handles its own echoing
+        """
+        Single-line text input dialog with full Unicode/UTF-8 support.
+        Handles umlauts and other special characters properly.
+        """
+        curses.noecho()
         curses.curs_set(1)
 
         # Calculate dimensions - taller to show prompt and footer
@@ -1006,36 +1339,128 @@ class TUI:
         # Footer with cancel instruction
         win.addstr(h - 2, 2, "[ESC] Cancel", curses.A_DIM)
 
-        # Inner window for editing
-        inner = win.derwin(1, w-4, input_y, 2)
-        box = curses.textpad.Textbox(inner)
-
         win.refresh()
-        self.stdscr.refresh()
 
-        # Flag to detect ESC
-        cancelled = [False]
+        # Text input state
+        text = ""
+        cursor_pos = 0  # Cursor position in characters (not bytes)
+        max_width = w - 6  # Leave space for borders and padding
 
-        # Validator to handle Enter (10/13) and ESC (27)
-        def validator(ch):
+        def redraw_input():
+            """Redraw the input line"""
+            # Clear the input area
+            win.addstr(input_y, 2, " " * (w - 4))
+
+            # Display text (handle scrolling if too long)
+            display_text = text
+            display_offset = 0
+
+            # If text is too long, scroll to show cursor position
+            if len(display_text) > max_width:
+                # Calculate offset to keep cursor visible
+                if cursor_pos > max_width - 5:
+                    display_offset = cursor_pos - max_width + 5
+                display_text = display_text[display_offset:display_offset + max_width]
+
+            try:
+                win.addstr(input_y, 2, display_text)
+            except curses.error:
+                pass  # Ignore if text is too wide
+
+            # Position cursor
+            cursor_x = min(cursor_pos - display_offset + 2, w - 3)
+            try:
+                win.move(input_y, cursor_x)
+            except curses.error:
+                pass
+
+            win.refresh()
+
+        # Main input loop
+        while True:
+            redraw_input()
+
+            try:
+                ch = win.getch()
+            except KeyboardInterrupt:
+                curses.curs_set(0)
+                del win
+                return None
+
+            # Handle special keys
             if ch == 27:  # ESC
-                cancelled[0] = True
-                return 7  # Ctrl-G (terminate)
-            if ch == 10 or ch == 13:
-                return 7 # Ctrl-G (terminate)
-            return ch
+                curses.curs_set(0)
+                del win
+                return None
 
-        result = box.edit(validator).strip()
+            elif ch == 10 or ch == 13:  # Enter
+                curses.curs_set(0)
+                del win
+                return text.strip() if text.strip() else None
 
-        curses.noecho()
-        curses.curs_set(0)
-        del win
+            elif ch == curses.KEY_BACKSPACE or ch == 127 or ch == 8:
+                # Backspace
+                if cursor_pos > 0:
+                    text = text[:cursor_pos-1] + text[cursor_pos:]
+                    cursor_pos -= 1
 
-        # Return None if cancelled
-        if cancelled[0]:
-            return None
+            elif ch == curses.KEY_DC:  # Delete key
+                if cursor_pos < len(text):
+                    text = text[:cursor_pos] + text[cursor_pos+1:]
 
-        return result
+            elif ch == curses.KEY_LEFT:
+                if cursor_pos > 0:
+                    cursor_pos -= 1
+
+            elif ch == curses.KEY_RIGHT:
+                if cursor_pos < len(text):
+                    cursor_pos += 1
+
+            elif ch == curses.KEY_HOME or ch == 1:  # Home or Ctrl+A
+                cursor_pos = 0
+
+            elif ch == curses.KEY_END or ch == 5:  # End or Ctrl+E
+                cursor_pos = len(text)
+
+            elif 32 <= ch <= 126:
+                # Regular ASCII printable characters
+                text = text[:cursor_pos] + chr(ch) + text[cursor_pos:]
+                cursor_pos += 1
+
+            elif ch > 127:
+                # UTF-8 multi-byte character (umlauts, etc.)
+                # curses returns the first byte, we need to read the rest
+                try:
+                    # Try to decode as UTF-8
+                    # For multibyte UTF-8, we need to collect all bytes
+                    bytes_collected = [ch]
+
+                    # Determine how many bytes we need based on the first byte
+                    if ch >= 0xF0:  # 4-byte character
+                        num_bytes = 4
+                    elif ch >= 0xE0:  # 3-byte character
+                        num_bytes = 3
+                    elif ch >= 0xC0:  # 2-byte character
+                        num_bytes = 2
+                    else:
+                        num_bytes = 1
+
+                    # Read remaining bytes
+                    for _ in range(num_bytes - 1):
+                        next_ch = win.getch()
+                        bytes_collected.append(next_ch)
+
+                    # Convert to character
+                    char_bytes = bytes([b & 0xFF for b in bytes_collected])
+                    char = char_bytes.decode('utf-8')
+
+                    # Insert character
+                    text = text[:cursor_pos] + char + text[cursor_pos:]
+                    cursor_pos += 1
+
+                except (UnicodeDecodeError, ValueError):
+                    # If decode fails, ignore the character
+                    pass
 
     def _multiline_input_dialog(self, title, prompt="", recent_notes=None, max_lines=10):
         """
@@ -1280,38 +1705,202 @@ class TUI:
                 return False
 
     def dialog_settings(self):
-        # Simple Toggle
-        current = self.state_manager.get_settings().get("pgp_enabled", True)
+        """Settings menu with GPG signing toggle and key selection"""
+        from .crypto import Crypto
+
+        # Load current settings
+        settings = self.state_manager.get_settings()
+        pgp_enabled = settings.get("pgp_enabled", True)
+        current_key = settings.get("gpg_key_id", None)
+
+        # Menu state
+        selected_option = 0
+        options = ["GPG Signing", "Select GPG Key", "Save", "Cancel"]
 
         curses.curs_set(0)
-        h = 6
-        w = 40
-        y = self.height // 2 - 2
+        h = 12
+        w = 60
+        y = self.height // 2 - 6
+        x = (self.width - w) // 2
+
+        win = curses.newwin(h, w, y, x)
+
+        while True:
+            win.clear()
+            win.box()
+            win.addstr(0, 2, " Settings ", curses.A_BOLD)
+
+            # Display current settings
+            win.addstr(2, 2, "Current Configuration:", curses.A_UNDERLINE)
+
+            # GPG Signing status
+            status = "ENABLED" if pgp_enabled else "DISABLED"
+            color = curses.color_pair(2) if pgp_enabled else curses.color_pair(3)
+            win.addstr(4, 4, "GPG Signing: ")
+            win.addstr(4, 18, f"{status}", color)
+
+            # Current GPG Key
+            if current_key:
+                key_display = current_key[:16] + "..." if len(current_key) > 16 else current_key
+                win.addstr(5, 4, f"GPG Key:     {key_display}")
+            else:
+                win.addstr(5, 4, "GPG Key:     [Default]", curses.A_DIM)
+
+            win.addstr(7, 2, "Options:", curses.A_UNDERLINE)
+
+            # Menu options
+            for i, option in enumerate(options):
+                y_pos = 8 + i
+                if i == selected_option:
+                    win.addstr(y_pos, 4, f"> {option}", curses.color_pair(1))
+                else:
+                    win.addstr(y_pos, 4, f"  {option}")
+
+            # Footer
+            win.addstr(h - 2, 2, "[Arrow Keys] Navigate  [Enter] Select  [Esc] Cancel", curses.A_DIM)
+            win.refresh()
+
+            ch = win.getch()
+
+            if ch == curses.KEY_UP:
+                if selected_option > 0:
+                    selected_option -= 1
+            elif ch == curses.KEY_DOWN:
+                if selected_option < len(options) - 1:
+                    selected_option += 1
+            elif ch == 10 or ch == 13:  # Enter
+                if selected_option == 0:  # Toggle GPG Signing
+                    pgp_enabled = not pgp_enabled
+                elif selected_option == 1:  # Select GPG Key
+                    # Open key selection dialog
+                    selected_key = self._dialog_select_gpg_key(current_key)
+                    if selected_key is not None:
+                        current_key = selected_key
+                elif selected_option == 2:  # Save
+                    self.state_manager.set_setting("pgp_enabled", pgp_enabled)
+                    self.state_manager.set_setting("gpg_key_id", current_key)
+                    self.show_message("Settings saved.")
+                    break
+                elif selected_option == 3:  # Cancel
+                    break
+            elif ch == 27:  # Esc
+                break
+
+        del win
+
+    def _dialog_select_gpg_key(self, current_key):
+        """Dialog to select a GPG key from available keys"""
+        from .crypto import Crypto
+
+        # Get available keys
+        available_keys = Crypto.list_gpg_keys()
+
+        if not available_keys:
+            # Show error message
+            self._show_error_dialog("No GPG Keys Found",
+                                   "No GPG secret keys found on this system.\n"
+                                   "Please generate a key using 'gpg --gen-key'.")
+            return None
+
+        # Add option for default key
+        key_options = [("default", "[Use GPG Default Key]")] + available_keys
+        selected_idx = 0
+
+        # Find currently selected key in list
+        if current_key:
+            for i, (key_id, _) in enumerate(key_options):
+                if key_id == current_key:
+                    selected_idx = i
+                    break
+
+        curses.curs_set(0)
+        h = min(len(key_options) + 6, self.height - 4)
+        w = min(70, self.width - 4)
+        y = (self.height - h) // 2
+        x = (self.width - w) // 2
+
+        win = curses.newwin(h, w, y, x)
+        scroll_offset = 0
+
+        while True:
+            win.clear()
+            win.box()
+            win.addstr(0, 2, " Select GPG Key ", curses.A_BOLD)
+
+            list_h = h - 5
+
+            # Update scroll
+            if selected_idx < scroll_offset:
+                scroll_offset = selected_idx
+            elif selected_idx >= scroll_offset + list_h:
+                scroll_offset = selected_idx - list_h + 1
+
+            # Display keys
+            for i in range(list_h):
+                idx = scroll_offset + i
+                if idx >= len(key_options):
+                    break
+
+                key_id, user_id = key_options[idx]
+                y_pos = 2 + i
+
+                # Truncate if needed
+                display_text = f"{key_id[:12]}... - {user_id[:40]}" if len(user_id) > 40 else f"{key_id[:12]}... - {user_id}"
+                if key_id == "default":
+                    display_text = user_id
+
+                display_text = self._safe_truncate(display_text, w - 6)
+
+                if idx == selected_idx:
+                    win.addstr(y_pos, 2, f"> {display_text}", curses.color_pair(1))
+                else:
+                    win.addstr(y_pos, 2, f"  {display_text}")
+
+            # Footer
+            win.addstr(h - 2, 2, "[Arrow Keys] Navigate  [Enter] Select  [Esc] Cancel", curses.A_DIM)
+            win.refresh()
+
+            ch = win.getch()
+
+            if ch == curses.KEY_UP:
+                if selected_idx > 0:
+                    selected_idx -= 1
+            elif ch == curses.KEY_DOWN:
+                if selected_idx < len(key_options) - 1:
+                    selected_idx += 1
+            elif ch == 10 or ch == 13:  # Enter
+                selected_key_id, _ = key_options[selected_idx]
+                del win
+                # Return None for default, otherwise return the key ID
+                return None if selected_key_id == "default" else selected_key_id
+            elif ch == 27:  # Esc
+                del win
+                return None
+
+        del win
+        return None
+
+    def _show_error_dialog(self, title, message):
+        """Show a simple error dialog"""
+        curses.curs_set(0)
+
+        # Calculate size based on message
+        lines = message.split('\n')
+        h = len(lines) + 5
+        w = min(max(len(line) for line in lines) + 6, self.width - 4)
+        y = (self.height - h) // 2
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
         win.box()
-        win.addstr(0, 2, " Settings ")
+        win.addstr(0, 2, f" {title} ", curses.A_BOLD | curses.color_pair(4))
 
-        while True:
-            status = "ENABLED" if current else "DISABLED"
-            color = curses.color_pair(2) if current else curses.color_pair(3)
+        for i, line in enumerate(lines):
+            win.addstr(2 + i, 2, self._safe_truncate(line, w - 4))
 
-            win.addstr(2, 4, "GPG Signing: ")
-            win.addstr(2, 17, f"[{status}]", color)
-            win.addstr(4, 2, "[Space] Toggle  [Enter] Save", curses.A_DIM)
-            win.refresh()
-
-            ch = win.getch()
-            if ch == 32: # Space
-                current = not current
-            elif ch == 10 or ch == 13: # Enter
-                self.state_manager.set_setting("pgp_enabled", current)
-                self.show_message("Settings saved.")
-                break
-            elif ch == 27: # Esc
-                break
-
+        win.addstr(h - 2, 2, "Press any key to continue...", curses.A_DIM)
+        win.refresh()
+        win.getch()
         del win
 
     def dialog_new_case(self):
@@ -1338,56 +1927,6 @@ class TUI:
         # After add_case, the case is already in self.storage.cases, no need to reload
         # Reload would create new object instances from disk, breaking any existing references
         self.show_message(f"Case {case_num} created.")
-
-    def _show_recent_notes_preview(self, notes, context_title):
-        """Show a preview window with recent notes before adding a new note"""
-        h = int(self.height * 0.7)
-        w = int(self.width * 0.8)
-        y = int(self.height * 0.15)
-        x = int(self.width * 0.1)
-
-        win = curses.newwin(h, w, y, x)
-        win.box()
-        win.attron(curses.A_BOLD | curses.color_pair(1))
-        win.addstr(0, 2, f" {context_title} - Recent Notes ", curses.A_BOLD)
-        win.attroff(curses.A_BOLD | curses.color_pair(1))
-
-        max_lines = h - 5
-
-        if not notes:
-            win.addstr(2, 2, "No existing notes.", curses.color_pair(3))
-        else:
-            win.addstr(1, 2, f"Showing last {len(notes)} note(s):", curses.A_DIM)
-
-            line_y = 3
-            for i, note in enumerate(notes):
-                if line_y >= max_lines:
-                    break
-
-                timestamp_str = time.ctime(note.timestamp)
-                # Header for each note
-                win.addstr(line_y, 2, f"[{timestamp_str}]", curses.color_pair(2))
-                line_y += 1
-
-                # Content - may wrap or truncate
-                content_lines = note.content.split('\n')
-                for content_line in content_lines:
-                    if line_y >= max_lines:
-                        break
-                    # Truncate safely for Unicode
-                    content_line = self._safe_truncate(content_line, w - 6)
-                    win.addstr(line_y, 4, content_line)
-                    line_y += 1
-
-                line_y += 1  # Blank line between notes
-
-        win.addstr(h - 2, 2, "Press any key to continue...", curses.A_DIM)
-        win.refresh()
-        win.getch()
-        del win
-        # Redraw the main screen
-        self.stdscr.clear()
-        self.stdscr.refresh()
 
     def dialog_new_evidence(self):
         if not self.active_case: return
@@ -1474,7 +2013,9 @@ class TUI:
         from .crypto import Crypto
 
         # Check settings
-        pgp_enabled = self.state_manager.get_settings().get("pgp_enabled", True)
+        settings = self.state_manager.get_settings()
+        pgp_enabled = settings.get("pgp_enabled", True)
+        gpg_key_id = settings.get("gpg_key_id", None)
 
         note = Note(content=content)
         note.calculate_hash()
@@ -1483,7 +2024,7 @@ class TUI:
 
         signed = False
         if pgp_enabled:
-            sig = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}")
+            sig = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id)
             if sig:
                 note.signature = sig
                 signed = True
