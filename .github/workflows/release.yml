@@ -30,14 +30,11 @@ jobs:
         pyinstaller --onefile --name trace-linux main.py
     
     - name: Upload Linux binary to release
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./dist/trace-linux
-        asset_name: trace-linux
-        asset_content_type: application/octet-stream
+        files: ./dist/trace-linux
 
   build-windows:
     runs-on: windows-latest
@@ -61,11 +58,8 @@ jobs:
         pyinstaller --onefile --name trace-windows main.py
     
     - name: Upload Windows executable to release
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./dist/trace-windows.exe
-        asset_name: trace-windows.exe
-        asset_content_type: application/octet-stream
+        files: ./dist/trace-windows.exe
