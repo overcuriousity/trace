@@ -490,67 +490,21 @@ class TUI:
         self.stdscr.attroff(note_color)
         y_pos += 1
 
-        # Split screen between case notes and evidence
-        # Allocate space: half for case notes, half for evidence (if both exist)
+        # Split screen between evidence and case notes
+        # Allocate space: half for evidence, half for case notes (if both exist)
         available_space = self.content_h - 5
         case_notes = self.active_case.notes
         evidence_list = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
-        # Determine context: are we selecting notes or evidence?
-        # If there are case notes, treat indices 0 to len(notes)-1 as notes
-        # If there is evidence, treat indices len(notes) to len(notes)+len(evidence)-1 as evidence
-        total_items = len(case_notes) + len(evidence_list)
+        # Determine context: are we selecting evidence or notes?
+        # Evidence items are indices 0 to len(evidence)-1
+        # Case notes are indices len(evidence) to len(evidence)+len(notes)-1
+        total_items = len(evidence_list) + len(case_notes)
 
         # Determine what's selected
-        selecting_note = self.selected_index < len(case_notes)
-
-        # Case Notes section
-        if case_notes:
-            if y_pos < self.height - 3:
-                self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
-                self.stdscr.addstr(y_pos, 2, "▪ Case Notes")
-                self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
-                self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
-                self.stdscr.addstr(y_pos, 16, f"({len(case_notes)} notes)")
-                self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
-            y_pos += 1
-
-            # Calculate space for case notes
-            notes_space = min(len(case_notes), available_space // 2) if evidence_list else available_space
-
-            # Update scroll position if needed
-            self._update_scroll(total_items)
-
-            # Display notes
-            for i in range(notes_space):
-                note_idx = self.scroll_offset + i
-                if note_idx >= len(case_notes):
-                    break
-
-                note = case_notes[note_idx]
-                y = y_pos + 1 + i
-                
-                # Check if we're out of bounds
-                if y >= self.height - 3:
-                    break
-
-                # Format note content
-                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-                display_str = f"- {note_content}"
-                display_str = self._safe_truncate(display_str, self.width - 6)
-
-                # Highlight if selected
-                if note_idx == self.selected_index:
-                    self.stdscr.attron(curses.color_pair(1))
-                    self.stdscr.addstr(y, 4, display_str)
-                    self.stdscr.attroff(curses.color_pair(1))
-                else:
-                    self.stdscr.addstr(y, 4, display_str)
-
-            y_pos += notes_space + 1
+        selecting_evidence = self.selected_index < len(evidence_list)
 
         # Evidence section header
-        y_pos += 1
         if y_pos < self.height - 3:
             self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
             self.stdscr.addstr(y_pos, 2, "▪ Evidence")
@@ -578,14 +532,26 @@ class TUI:
 
             self._update_scroll(total_items)
 
-            for i in range(list_h):
-                # Evidence indices start after case notes
-                evidence_idx = self.scroll_offset + i - len(case_notes)
+            # Calculate space for evidence
+            evidence_space = min(len(evidence_list), available_space // 2) if case_notes else available_space
+
+            self._update_scroll(total_items)
+
+            # Calculate which evidence items to display
+            # If selecting a case note, show evidence from the beginning
+            # If selecting evidence, scroll to show the selected evidence
+            if selecting_evidence:
+                evidence_scroll_offset = max(0, self.selected_index - evidence_space // 2)
+            else:
+                evidence_scroll_offset = 0
+
+            for i in range(evidence_space):
+                evidence_idx = evidence_scroll_offset + i
                 if evidence_idx < 0 or evidence_idx >= len(evidence_list):
                     continue
 
                 ev = evidence_list[evidence_idx]
-                y = y_pos + 2 + i
+                y = y_pos + i
                 if y >= self.height - 3:  # Don't overflow into status bar
                     break
 
@@ -628,8 +594,7 @@ class TUI:
                 base_display = self._safe_truncate(display_str, self.width - 6)
 
                 # Check if this evidence item is selected
-                item_idx = len(case_notes) + evidence_idx
-                if item_idx == self.selected_index:
+                if evidence_idx == self.selected_index:
                     # Highlighted selection
                     self.stdscr.attron(curses.color_pair(1))
                     self.stdscr.addstr(y, 4, base_display)
@@ -661,6 +626,56 @@ class TUI:
                             self.stdscr.attroff(curses.color_pair(4))
                         else:
                             self.stdscr.addstr(y, 4, base_display)
+
+            y_pos += evidence_space
+
+        # Case Notes section
+        if case_notes:
+            y_pos += 2
+            if y_pos < self.height - 3:
+                self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+                self.stdscr.addstr(y_pos, 2, "▪ Case Notes")
+                self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+                self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+                self.stdscr.addstr(y_pos, 16, f"({len(case_notes)} notes)")
+                self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+            y_pos += 1
+
+            # Calculate remaining space for case notes
+            remaining_space = self.content_h - (y_pos - 2)
+            notes_space = max(1, remaining_space)
+
+            # Calculate which notes to display
+            if selecting_evidence:
+                notes_scroll_offset = 0
+            else:
+                notes_scroll_offset = max(0, (self.selected_index - len(evidence_list)) - notes_space // 2)
+
+            for i in range(notes_space):
+                note_idx = notes_scroll_offset + i
+                if note_idx >= len(case_notes):
+                    break
+
+                note = case_notes[note_idx]
+                y = y_pos + i
+                
+                # Check if we're out of bounds
+                if y >= self.height - 3:
+                    break
+
+                # Format note content
+                note_content = note.content.replace('\n', ' ').replace('\r', ' ')
+                display_str = f"- {note_content}"
+                display_str = self._safe_truncate(display_str, self.width - 6)
+
+                # Highlight if selected
+                item_idx = len(evidence_list) + note_idx
+                if item_idx == self.selected_index:
+                    self.stdscr.attron(curses.color_pair(1))
+                    self.stdscr.addstr(y, 4, display_str)
+                    self.stdscr.attroff(curses.color_pair(1))
+                else:
+                    self.stdscr.addstr(y, 4, display_str)
 
         self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
 
@@ -1148,10 +1163,10 @@ class TUI:
                 filtered = self._get_filtered_list(self.cases, "case_number", "name")
                 max_idx = len(filtered) - 1
             elif self.current_view == "case_detail" and self.active_case:
-                # Total items = case notes + evidence
+                # Total items = evidence + case notes
                 case_notes = self.active_case.notes
                 filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-                max_idx = len(case_notes) + len(filtered) - 1
+                max_idx = len(filtered) + len(case_notes) - 1
             elif self.current_view == "evidence_detail" and self.active_evidence:
                 # Navigate through notes in evidence detail view
                 max_idx = len(self.active_evidence.notes) - 1
@@ -1191,19 +1206,19 @@ class TUI:
                     case_notes = self.active_case.notes
                     filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
-                    # Check if selecting a note or evidence
-                    if self.selected_index < len(case_notes):
-                        # Selected a note - show note detail view
-                        self.current_note = case_notes[self.selected_index]
-                        self.previous_view = "case_detail"
-                        self.current_view = "note_detail"
-                        self.filter_query = ""
-                    elif filtered and self.selected_index - len(case_notes) < len(filtered):
+                    # Check if selecting evidence or note
+                    if self.selected_index < len(filtered):
                         # Selected evidence - navigate to evidence detail
-                        evidence_idx = self.selected_index - len(case_notes)
-                        self.active_evidence = filtered[evidence_idx]
+                        self.active_evidence = filtered[self.selected_index]
                         self.current_view = "evidence_detail"
                         self.selected_index = 0
+                        self.filter_query = ""
+                    elif case_notes and self.selected_index - len(filtered) < len(case_notes):
+                        # Selected a note - show note detail view
+                        note_idx = self.selected_index - len(filtered)
+                        self.current_note = case_notes[note_idx]
+                        self.previous_view = "case_detail"
+                        self.current_view = "note_detail"
                         self.filter_query = ""
             elif self.current_view == "tags_list":
                 # Enter tag -> show notes with that tag
@@ -2036,14 +2051,10 @@ class TUI:
             return
 
         desc = self._input_dialog("New Evidence - Step 2/3", "Enter description (optional):")
-        if desc is None:
-            self.show_message("Evidence creation cancelled.")
-            return
-
+        # For optional fields, treat None as empty string (user pressed Enter on empty field)
+        
         source_hash = self._input_dialog("New Evidence - Step 3/3", "Enter source hash (optional, e.g. SHA256):")
-        if source_hash is None:
-            self.show_message("Evidence creation cancelled.")
-            return
+        # For optional fields, treat None as empty string (user pressed Enter on empty field)
 
         ev = Evidence(name=name, description=desc or "")
         if source_hash:
