@@ -144,17 +144,18 @@ class TUI:
     def _classify_ioc(self, ioc):
         """Classify IOC type based on pattern"""
         import re
-        if re.match(r'^[a-fA-F0-9]{32}$', ioc):
-            return 'MD5'
+        # Check longest hashes first to avoid misclassification
+        if re.match(r'^[a-fA-F0-9]{64}$', ioc):
+            return 'SHA256'
         elif re.match(r'^[a-fA-F0-9]{40}$', ioc):
             return 'SHA1'
-        elif re.match(r'^[a-fA-F0-9]{64}$', ioc):
-            return 'SHA256'
+        elif re.match(r'^[a-fA-F0-9]{32}$', ioc):
+            return 'MD5'
         elif re.match(r'^https?://', ioc):
             return 'URL'
         elif '@' in ioc:
             return 'EMAIL'
-        elif re.match(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', ioc):
+        elif re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', ioc):
             return 'IPv4'
         elif ':' in ioc and any(c in '0123456789abcdefABCDEF' for c in ioc):
             return 'IPv6'

@@ -43,9 +43,6 @@ Key objectives:
         case_note1.extract_iocs()
         demo_case.notes.append(case_note1)
 
-        # Wait a moment for different timestamp
-        time.sleep(0.1)
-
         case_note2 = Note(content="""Investigation lead: Employee reported suspicious email from sender@phishing-domain.com
 Initial analysis shows potential credential harvesting attempt.
 Review email headers and attachments for IOCs. #phishing #email-analysis""")
@@ -53,8 +50,6 @@ Review email headers and attachments for IOCs. #phishing #email-analysis""")
         case_note2.extract_tags()
         case_note2.extract_iocs()
         demo_case.notes.append(case_note2)
-
-        time.sleep(0.1)
 
         # Create evidence 1: Compromised laptop
         evidence1 = Evidence(
@@ -74,8 +69,6 @@ Chain of custody maintained throughout process. #forensics #imaging #chain-of-cu
         note1.extract_iocs()
         evidence1.notes.append(note1)
 
-        time.sleep(0.1)
-
         note2 = Note(content="""Discovered suspicious connections to external IP addresses:
 - 192.168.1.100 (local gateway)
 - 203.0.113.45 (external, geolocation: Unknown)
@@ -88,8 +81,6 @@ Browser history shows visits to malicious-site.com and data-exfil.net.
         note2.extract_iocs()
         evidence1.notes.append(note2)
 
-        time.sleep(0.1)
-
         note3 = Note(content="""Malware identified in temp directory:
 File: evil.exe
 MD5: d41d8cd98f00b204e9800998ecf8427e
@@ -101,8 +92,6 @@ Submitting to VirusTotal for analysis. #malware #hash-analysis #virustotal""")
         note3.extract_tags()
         note3.extract_iocs()
         evidence1.notes.append(note3)
-
-        time.sleep(0.1)
 
         note4 = Note(content="""Timeline analysis reveals:
 - 2024-01-15 09:23:45 - Suspicious email received
@@ -117,8 +106,6 @@ User credentials compromised. Recommend immediate password reset. #timeline #lat
         evidence1.notes.append(note4)
 
         demo_case.evidence.append(evidence1)
-
-        time.sleep(0.1)
 
         # Create evidence 2: Network logs
         evidence2 = Evidence(
@@ -139,8 +126,6 @@ Total data transferred: approximately 2.3 GB over 4 hours.
         note5.extract_iocs()
         evidence2.notes.append(note5)
 
-        time.sleep(0.1)
-
         note6 = Note(content="""Contact information found in malware configuration:
 Email: attacker@malicious-domain.com
 Backup C2: 2001:0db8:85a3:0000:0000:8a2e:0370:7334 (IPv6)
@@ -152,8 +137,6 @@ Cross-referencing with threat intelligence databases. #threat-intel #attribution
         evidence2.notes.append(note6)
 
         demo_case.evidence.append(evidence2)
-
-        time.sleep(0.1)
 
         # Create evidence 3: Email forensics
         evidence3 = Evidence(
@@ -240,8 +223,11 @@ class StateManager:
         state = self.get_active()
         state["case_id"] = case_id
         state["evidence_id"] = evidence_id
-        with open(self.state_file, 'w') as f:
+        # Atomic write: write to temp file then rename
+        temp_file = self.state_file.with_suffix(".tmp")
+        with open(temp_file, 'w') as f:
             json.dump(state, f)
+        temp_file.replace(self.state_file)
 
     def get_active(self) -> dict:
         if not self.state_file.exists():
@@ -250,7 +236,7 @@ class StateManager:
             with open(self.state_file, 'r') as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
-             return {"case_id": None, "evidence_id": None}
+            return {"case_id": None, "evidence_id": None}
 
     def get_settings(self) -> dict:
         if not self.settings_file.exists():
@@ -264,5 +250,8 @@ class StateManager:
     def set_setting(self, key: str, value):
         settings = self.get_settings()
         settings[key] = value
-        with open(self.settings_file, 'w') as f:
+        # Atomic write: write to temp file then rename
+        temp_file = self.settings_file.with_suffix(".tmp")
+        with open(temp_file, 'w') as f:
             json.dump(settings, f)
+        temp_file.replace(self.settings_file)
