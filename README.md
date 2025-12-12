@@ -129,3 +129,8 @@ Trace maintains a simple flat-file structure in the user's home directory.
 -----
 
 *License: MIT*
+
+**DISCLAIMER**
+This program was mostly vibe-coded. This was a deliberate decision as I wanted to focus on producing a usable result with okay user experience rather than implementation details and educating myself by lengthy coding sessions.
+I reviewed sections of the code manually and found no issues. The application should be safe to use from a integrity, security and admissability standpoint, while I wont ever make any warranties on this.
+The coding agents I mostly used were in this order: Claude Sonnett 45 (CLI), Claude Haiku 4.5 (VSCode Copilot), Google Jules (version unknown).
