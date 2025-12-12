@@ -15,7 +15,7 @@ class Crypto:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            stdout, stderr = proc.communicate()
+            stdout, stderr = proc.communicate(timeout=10)
 
             if proc.returncode != 0:
                 return []
@@ -41,8 +41,8 @@ class Crypto:
 
             return keys
 
-        except FileNotFoundError:
-            return []  # GPG not installed
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []  # GPG not installed or timed out
 
     @staticmethod
     def sign_content(content: str, key_id: str = None) -> str:
@@ -71,7 +71,7 @@ class Crypto:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            stdout, stderr = proc.communicate(input=content)
+            stdout, stderr = proc.communicate(input=content, timeout=10)
 
             if proc.returncode != 0:
                 # Fallback: maybe no key is found or gpg error
@@ -79,8 +79,8 @@ class Crypto:
                 return ""
 
             return stdout
-        except FileNotFoundError:
-            return "" # GPG not installed
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return "" # GPG not installed or timed out
 
     @staticmethod
     def hash_content(content: str, timestamp: float) -> str:

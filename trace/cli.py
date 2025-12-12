@@ -66,50 +66,54 @@ def quick_add_note(content: str):
     storage.save_data()
 
 def export_markdown(output_file: str = "export.md"):
-    storage = Storage()
+    try:
+        storage = Storage()
 
-    with open(output_file, "w") as f:
-        f.write("# Forensic Notes Export\n\n")
-        f.write(f"Generated on: {time.ctime()}\n\n")
+        with open(output_file, "w") as f:
+            f.write("# Forensic Notes Export\n\n")
+            f.write(f"Generated on: {time.ctime()}\n\n")
 
-        for case in storage.cases:
-            f.write(f"## Case: {case.case_number}\n")
-            if case.name:
-                f.write(f"**Name:** {case.name}\n")
-            if case.investigator:
-                f.write(f"**Investigator:** {case.investigator}\n")
-            f.write(f"**Case ID:** {case.case_id}\n\n")
+            for case in storage.cases:
+                f.write(f"## Case: {case.case_number}\n")
+                if case.name:
+                    f.write(f"**Name:** {case.name}\n")
+                if case.investigator:
+                    f.write(f"**Investigator:** {case.investigator}\n")
+                f.write(f"**Case ID:** {case.case_id}\n\n")
 
-            f.write("### Case Notes\n")
-            if not case.notes:
-                f.write("_No notes._\n")
-            for note in case.notes:
-                write_note(f, note)
-
-            f.write("\n### Evidence\n")
-            if not case.evidence:
-                f.write("_No evidence._\n")
-
-            for ev in case.evidence:
-                f.write(f"#### Evidence: {ev.name}\n")
-                if ev.description:
-                    f.write(f"_{ev.description}_\n")
-                f.write(f"**ID:** {ev.evidence_id}\n")
-
-                # Include source hash if available
-                source_hash = ev.metadata.get("source_hash")
-                if source_hash:
-                    f.write(f"**Source Hash:** `{source_hash}`\n")
-                f.write("\n")
-
-                f.write("##### Evidence Notes\n")
-                if not ev.notes:
+                f.write("### Case Notes\n")
+                if not case.notes:
                     f.write("_No notes._\n")
-                for note in ev.notes:
+                for note in case.notes:
                     write_note(f, note)
-                f.write("\n")
-            f.write("---\n\n")
-    print(f"Exported to {output_file}")
+
+                f.write("\n### Evidence\n")
+                if not case.evidence:
+                    f.write("_No evidence._\n")
+
+                for ev in case.evidence:
+                    f.write(f"#### Evidence: {ev.name}\n")
+                    if ev.description:
+                        f.write(f"_{ev.description}_\n")
+                    f.write(f"**ID:** {ev.evidence_id}\n")
+
+                    # Include source hash if available
+                    source_hash = ev.metadata.get("source_hash")
+                    if source_hash:
+                        f.write(f"**Source Hash:** `{source_hash}`\n")
+                    f.write("\n")
+
+                    f.write("##### Evidence Notes\n")
+                    if not ev.notes:
+                        f.write("_No notes._\n")
+                    for note in ev.notes:
+                        write_note(f, note)
+                    f.write("\n")
+                f.write("---\n\n")
+        print(f"Exported to {output_file}")
+    except (IOError, OSError, PermissionError) as e:
+        print(f"Error: Failed to export to {output_file}: {e}")
+        sys.exit(1)
 
 def write_note(f, note: Note):
     f.write(f"- **{time.ctime(note.timestamp)}**\n")
