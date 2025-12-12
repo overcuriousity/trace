@@ -37,6 +37,27 @@ Invoke-WebRequest -Uri "https://github.com/overcuriousity/trace/releases/latest/
 ```
 *Note: Create `$env:USERPROFILE\bin` directory first if it doesn't exist, then restart your shell.*
 
+**Optional: Create Ultra-Fast Alias**
+
+For maximum speed when logging, create a single-character alias:
+
+**Linux / macOS (Bash):**
+```bash
+echo 'alias t="trace"' >> ~/.bashrc && source ~/.bashrc
+```
+
+**Linux / macOS (Zsh):**
+```bash
+echo 'alias t="trace"' >> ~/.zshrc && source ~/.zshrc
+```
+
+**Windows (PowerShell):**
+```powershell
+New-Item -ItemType File -Force $PROFILE; Add-Content $PROFILE 'function t { trace $args }'; . $PROFILE
+```
+
+After this, you can log with just: `t "Your note here"`
+
 ---
 
 ### Platform: Linux / UNIX (including macOS)
