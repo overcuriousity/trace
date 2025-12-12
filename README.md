@@ -1,158 +1,131 @@
-# trace - Forensic Notes
+# trace - Digital Evidence Log Utility
 
-`trace` is a minimal, terminal-based forensic note-taking application designed for digital investigators and incident responders. It provides a secure, integrity-focused environment for case management and evidence logging.
+`trace` is a bare-bones, terminal-centric note-taking utility for digital forensics and incident response. It is designed for maximum operational efficiency, ensuring that the integrity of your log data is never compromised by the need to slow down.
 
-## Features
+This tool mandates minimal system overhead, relying solely on standard libraries where possible.
 
-*   **Integrity Focused:**
-    *   **Hashing:** Every note is automatically SHA256 hashed (content + timestamp).
-    *   **Signing:** Optional GPG signing of notes for non-repudiation (requires system `gpg`).
-*   **Minimal Dependencies:** Written in Python using only the standard library (`curses`, `json`, `sqlite3` avoided, etc.) + `pyinstaller` for packaging.
-*   **Dual Interface:**
-    *   **TUI (Text User Interface):** Interactive browsing of Cases and Evidence hierarchies with multi-line note editor.
-    *   **CLI Shorthand:** Quickly append notes to the currently active Case/Evidence from your shell (`trace "Found a USB key"`).
-*   **Multi-Line Notes:** Full-featured text editor supports detailed forensic observations with multiple lines, arrow key navigation, and scrolling.
-*   **Evidence Source Hashing:** Optionally store source hash values (e.g., SHA256) as metadata when creating evidence items for chain of custody tracking.
-*   **Tag System:** Organize notes with hashtags (e.g., `#malware #windows #critical`). View tags sorted by usage, filter notes by tag, and navigate tagged notes with full context.
-*   **IOC Detection:** Automatically extracts Indicators of Compromise (IPs, domains, URLs, hashes, emails) from notes. View, filter, and export IOCs with occurrence counts and context separators.
-*   **Context Awareness:** Set an "Active" context in the TUI, which persists across sessions for CLI note taking. Recent notes displayed inline for reference.
-*   **Filtering:** Quickly filter Cases and Evidence lists (press `/`).
-*   **Export:** Export all data to a formatted Markdown report with verification details, including evidence source hashes.
+## ⚡ Key Feature: Hot Logging (CLI Shorthand)
 
-## Installation
+The primary operational benefit of `trace` is its ability to accept input directly from the command line, bypassing the full interface. Once your active target context is set, you can drop notes instantly.
 
-### From Source
+**Configuration:** Use the TUI to set a Case or Evidence ID as "Active" (`a`). This state persists across sessions.
 
-Requires Python 3.x.
+**Syntax for Data Injection:**
 
 ```bash
-git clone <repository_url>
-cd trace
-# Run directly
-python3 main.py
+# Log an immediate status update
+trace "IR team gained shell access. Initial persistence checks running."
+
+# Log data and tag it for later triage
+trace "Observed outbound connection to 192.168.1.55 on port 80. #suspicious #network"
 ```
 
-### Building Binary
+**System Integrity Chain:** Each command-line note is immediately stamped, concatenated with its content, and hashed using SHA256 before storage. This ensures a non-repudiable log entry.
 
-You can build a single-file executable using PyInstaller.
+## Installation & Deployment
 
-#### Linux/macOS
+### Platform: Linux / UNIX (including macOS)
 
-```bash
-pip install -r requirements.txt
-./build_binary.sh
-# Binary will be in dist/trace
-./dist/trace
-```
+**Prerequisites:** Python 3.x and the binary build utility (PyInstaller).
 
-#### Windows
+**Deployment:**
 
-```powershell
-# Install dependencies (includes windows-curses)
-pip install -r requirements.txt
+1.  **Build Binary:** Execute the build script in the source directory.
 
-# Build the executable
-pyinstaller --onefile --name trace --clean --paths . --hidden-import curses main.py
+    ```bash
+    ./build_binary.sh
+    ```
 
-# Binary will be in dist\trace.exe
-.\dist\trace.exe
-```
+    *The output executable will land in `dist/trace`.*
 
-### Installing to PATH
+2.  **Path Integration:** For universal access, the binary must reside in a directory referenced by your `$PATH` environment variable (e.g., `/usr/local/bin`).
 
-After building the binary, you can install it to your system PATH for easy access:
+    ```bash
+    # Place executable in system path
+    sudo mv dist/trace /usr/local/bin/
 
-#### Linux/macOS
+    # Ensure execute bit is set
+    sudo chmod +x /usr/local/bin/trace
+    ```
 
-```bash
-# Option 1: Copy to /usr/local/bin (requires sudo)
-sudo cp dist/trace /usr/local/bin/
+    You are now cleared to run `trace` from any shell prompt.
 
-# Option 2: Copy to ~/.local/bin (user-only, ensure ~/.local/bin is in PATH)
-mkdir -p ~/.local/bin
-cp dist/trace ~/.local/bin/
+### Platform: Windows
 
-# Add to PATH if not already (add to ~/.bashrc or ~/.zshrc)
-export PATH="$HOME/.local/bin:$PATH"
-```
+**Prerequisites:** Python 3.x, `pyinstaller`, and the `windows-curses` library.
 
-#### Windows
+**Deployment:**
 
-```powershell
-# Option 1: Copy to a directory in PATH (e.g., C:\Windows\System32 - requires admin)
-Copy-Item dist\trace.exe C:\Windows\System32\
+1.  **Build Binary:** Run the build command in a PowerShell or CMD environment.
 
-# Option 2: Create a local bin directory and add to PATH
-# 1. Create directory
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin"
-Copy-Item dist\trace.exe "$env:USERPROFILE\bin\"
+    ```powershell
+    pyinstaller --onefile --name trace --clean --paths . --hidden-import curses main.py
+    ```
 
-# 2. Add to PATH permanently (run as admin or use GUI: System Properties > Environment Variables)
-[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+    *The executable is located at `dist\trace.exe`.*
 
-# 3. Restart terminal/PowerShell for changes to take effect
-```
+2.  **Path Integration:** The executable must be accessible via your user or system `%PATH%` variable for the hot-logging feature to function correctly.
 
-## Usage
+    *Option A: System Directory (Requires Administrator Privilege)*
 
-### TUI Mode
-Run `trace` without arguments to open the interface.
+    ```powershell
+    Copy-Item dist\trace.exe C:\Windows\System32\
+    ```
 
-**Navigation:**
-*   `Arrow Keys`: Navigate lists.
-*   `Enter`: Select Case / View Evidence details.
-*   `b`: Back.
-*   `q`: Quit.
+    *Option B: User-Defined Bin Directory (Recommended)*
 
-**Management:**
-*   `n`: Add a Note to the current context (works in any view).
-    *   **Multi-line support**: Notes can span multiple lines - press `Enter` for new lines.
-    *   **Tagging**: Use hashtags in your notes (e.g., `#malware #critical`) for organization.
-    *   Press `Ctrl+G` to submit the note, or `Esc` to cancel.
-    *   Recent notes are displayed inline for context (non-blocking).
-*   `N` (Shift+n): New Case (in Case List) or New Evidence (in Case Detail).
-*   `t`: **Tags View**. Browse all tags in the current context (case or evidence), sorted by usage count.
-    *   Press `Enter` on a tag to see all notes with that tag.
-    *   Press `Enter` on a note to view full details with tag highlighting.
-    *   Navigate back with `b`.
-*   `i`: **IOCs View**. View all Indicators of Compromise extracted from notes in the current context.
-    *   Shows IOC types (IPv4, domain, URL, hash, email) with occurrence counts.
-    *   Press `Enter` on an IOC to see all notes containing it.
-    *   Press `e` to export IOCs to `~/.trace/exports/` in plain text format.
-    *   IOC counts are displayed in red in case and evidence views.
-*   `a`: **Set Active**. Sets the currently selected Case or Evidence as the global "Active" context.
-*   `d`: Delete the selected Case or Evidence (with confirmation).
-*   `v`: **View All Notes**. View all notes for the current Case or Evidence in a scrollable full-screen view.
-    *   **IOC Highlighting**: All IOCs in notes are automatically highlighted in red for immediate visibility.
-    *   **Tag Highlighting**: Hashtags are highlighted in cyan.
-    *   Press `Enter` on any note in case/evidence detail view to jump directly to that note in the full view.
-    *   The selected note will be centered and highlighted.
-    *   Navigate with arrow keys, Page Up/Down, Home/End.
-    *   Press `n` to add a new note without leaving the view.
-*   `/`: Filter list (type to search, `Esc` or `Enter` to exit filter mode).
-*   `s`: Settings menu (in Case List view).
-*   `Esc`: Cancel during input dialogs.
+    ```powershell
+    # Create the user bin location
+    New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin"
+    Copy-Item dist\trace.exe "$env:USERPROFILE\bin\"
 
-### CLI Mode
-Once a Case or Evidence is set as **Active** in the TUI, you can add notes directly from the command line:
+    # Inject the directory into the User PATH variable
+    [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+    ```
 
-```bash
-trace "Suspect system is powered on, attempting live memory capture."
-```
+    **ATTENTION:** You must cycle your command shell (exit and reopen) before the `trace` command will resolve correctly.
 
-This note is automatically timestamped, hashed, signed, and appended to the active context.
+## Core Feature Breakdown
 
-### Exporting
-To generate a report:
+| Feature | Description | Operational Impact |
+| :--- | :--- | :--- |
+| **Integrity Hashing** | SHA256 applied to every log entry (content + timestamp). | **Guaranteed log integrity.** No modification possible post-entry. |
+| **GPG Signing** | Optional PGP/GPG signature applied to notes. | **Non-repudiation** for formal evidence handling. |
+| **IOC Extraction** | Automatic parsing of IPv4, FQDNs, URLs, hashes, and email addresses. | **Immediate intelligence gathering** from raw text. |
+| **Tag System** | Supports `#hashtags` for classification and filtering. | **Efficient triage** of large log sets. |
+| **Minimal Footprint** | Built solely on Python standard library modules. | **Maximum portability** on restricted forensic environments. |
+
+## TUI Reference (Management Console)
+
+Execute `trace` (no arguments) to enter the Text User Interface. This environment is used for setup, review, and reporting.
+
+| Key | Function | Detail |
+| :--- | :--- | :--- |
+| `a` | **Set Active** | Designate the current item as the target for CLI injection (hot-logging). |
+| `n` | **New Note** | Enter the multi-line log editor. Use $\text{Ctrl+G}$ to save block. |
+| `i` | **IOC Index** | View extracted indicators. Option to export IOC list (`e`). |
+| `t` | **Tag Index** | View classification tags and filter notes by frequency. |
+| `v` | **Full View** | Scrollable screen showing all log entries with automatic IOC/Tag highlighting. |
+| `/` | **Filter** | Initiate text-based search/filter on lists. |
+| $\text{Enter}$ | **Drill Down** | Access details for Case or Evidence. |
+| `q` | **Exit** | Close the application. |
+
+## Report Generation
+
+To generate the Markdown report package, use the `--export` flag.
 
 ```bash
 trace --export
-# Creates trace_export.md
+# Creates trace_export.md in the current directory.
 ```
 
-## Data Storage
-Data is stored in JSON format at `~/.trace/data.json`.
-Application state (active context) is stored at `~/.trace/state`.
+## Data Persistence
 
-## License
-MIT
+Trace maintains a simple flat-file structure in the user's home directory.
+
+  * `~/.trace/data.json`: Case log repository.
+  * `~/.trace/state`: Active context pointer.
+
+-----
+
+*License: MIT*
