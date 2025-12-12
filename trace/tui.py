@@ -57,6 +57,10 @@ class TUI:
             curses.init_pair(7, curses.COLOR_BLUE, curses.COLOR_BLACK)
             # Tags (magenta)
             curses.init_pair(8, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+            # IOCs on selected background (red on cyan)
+            curses.init_pair(9, curses.COLOR_RED, curses.COLOR_CYAN)
+            # Tags on selected background (yellow on cyan)
+            curses.init_pair(10, curses.COLOR_YELLOW, curses.COLOR_CYAN)
 
         self.height, self.width = stdscr.getmaxyx()
 
@@ -256,6 +260,102 @@ class TUI:
             truncated = truncated[:-1]
 
         return ellipsis[:max_width]
+
+    def _display_line_with_highlights(self, y, x_start, line, is_selected=False, win=None):
+        """
+        Display a line with intelligent highlighting.
+        - IOCs are highlighted with color_pair(4) (red)
+        - Tags are highlighted with color_pair(3) (yellow)
+        - Selection background is color_pair(1) (cyan) for non-IOC text
+        - IOC highlighting takes priority over selection
+        """
+        import re
+        from .models import Note
+        
+        # Use provided window or default to main screen
+        screen = win if win is not None else self.stdscr
+        
+        # Extract IOCs and tags
+        highlights = []
+        
+        # Get IOCs with positions
+        for text, start, end, ioc_type in Note.extract_iocs_with_positions(line):
+            highlights.append((text, start, end, 'ioc'))
+        
+        # Get tags
+        for match in re.finditer(r'#\w+', line):
+            highlights.append((match.group(), match.start(), match.end(), 'tag'))
+        
+        # Sort by position and remove overlaps (IOCs take priority over tags)
+        highlights.sort(key=lambda x: x[1])
+        deduplicated = []
+        last_end = -1
+        for text, start, end, htype in highlights:
+            if start >= last_end:
+                deduplicated.append((text, start, end, htype))
+                last_end = end
+        highlights = deduplicated
+        
+        if not highlights:
+            # No highlights - use selection color if selected
+            if is_selected:
+                screen.attron(curses.color_pair(1))
+                screen.addstr(y, x_start, line)
+                screen.attroff(curses.color_pair(1))
+            else:
+                screen.addstr(y, x_start, line)
+            return
+        
+        # Display with intelligent highlighting
+        x_pos = x_start
+        last_pos = 0
+        
+        for text, start, end, htype in highlights:
+            # Add text before this highlight
+            if start > last_pos:
+                text_before = line[last_pos:start]
+                if is_selected:
+                    screen.attron(curses.color_pair(1))
+                    screen.addstr(y, x_pos, text_before)
+                    screen.attroff(curses.color_pair(1))
+                else:
+                    screen.addstr(y, x_pos, text_before)
+                x_pos += len(text_before)
+            
+            # Add highlighted text
+            if htype == 'ioc':
+                # IOC highlighting: red on cyan if selected, red on black otherwise
+                if is_selected:
+                    screen.attron(curses.color_pair(9) | curses.A_BOLD)
+                    screen.addstr(y, x_pos, text)
+                    screen.attroff(curses.color_pair(9) | curses.A_BOLD)
+                else:
+                    screen.attron(curses.color_pair(4) | curses.A_BOLD)
+                    screen.addstr(y, x_pos, text)
+                    screen.attroff(curses.color_pair(4) | curses.A_BOLD)
+            else:  # tag
+                # Tag highlighting: yellow on cyan if selected, yellow on black otherwise
+                if is_selected:
+                    screen.attron(curses.color_pair(10))
+                    screen.addstr(y, x_pos, text)
+                    screen.attroff(curses.color_pair(10))
+                else:
+                    screen.attron(curses.color_pair(3))
+                    screen.addstr(y, x_pos, text)
+                    screen.attroff(curses.color_pair(3))
+            
+            x_pos += len(text)
+            last_pos = end
+        
+        # Add remaining text
+        if last_pos < len(line):
+            text_after = line[last_pos:]
+            if is_selected:
+                screen.attron(curses.color_pair(1))
+                screen.addstr(y, x_pos, text_after)
+                screen.attroff(curses.color_pair(1))
+            else:
+                screen.addstr(y, x_pos, text_after)
 
     def draw_header(self):
         # Modern header with icon and better styling
@@ -538,10 +638,17 @@ class TUI:
             self._update_scroll(total_items)
 
             # Calculate which evidence items to display
+            # If selecting evidence, scroll just enough to keep it visible
             # If selecting a case note, show evidence from the beginning
-            # If selecting evidence, scroll to show the selected evidence
             if selecting_evidence:
-                evidence_scroll_offset = max(0, self.selected_index - evidence_space // 2)
+                # Keep selection visible: scroll up if needed, scroll down if needed
+                if self.selected_index < 0:
+                    evidence_scroll_offset = 0
+                elif self.selected_index >= evidence_space:
+                    # Scroll down only as much as needed to show the selected item at the bottom
+                    evidence_scroll_offset = self.selected_index - evidence_space + 1
+                else:
+                    evidence_scroll_offset = 0
             else:
                 evidence_scroll_offset = 0
 
@@ -668,14 +775,10 @@ class TUI:
                 display_str = f"- {note_content}"
                 display_str = self._safe_truncate(display_str, self.width - 6)
 
-                # Highlight if selected
+                # Display with smart highlighting (IOCs take priority over selection)
                 item_idx = len(evidence_list) + note_idx
-                if item_idx == self.selected_index:
-                    self.stdscr.attron(curses.color_pair(1))
-                    self.stdscr.addstr(y, 4, display_str)
-                    self.stdscr.attroff(curses.color_pair(1))
-                else:
-                    self.stdscr.addstr(y, 4, display_str)
+                is_selected = (item_idx == self.selected_index)
+                self._display_line_with_highlights(y, 4, display_str, is_selected)
 
         self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
 
@@ -733,13 +836,9 @@ class TUI:
             # Truncate safely for Unicode
             display_str = self._safe_truncate(display_str, self.width - 6)
 
-            # Highlight selected note
-            if idx == self.selected_index:
-                self.stdscr.attron(curses.color_pair(1))
-                self.stdscr.addstr(start_y + i, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
-            else:
-                self.stdscr.addstr(start_y + i, 4, display_str)
+            # Display with smart highlighting (IOCs take priority over selection)
+            is_selected = (idx == self.selected_index)
+            self._display_line_with_highlights(start_y + i, 4, display_str, is_selected)
 
         self.stdscr.addstr(self.height - 3, 2, "[n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete Note  [?] Help", curses.color_pair(3))
 
@@ -928,70 +1027,12 @@ class TUI:
 
             # Highlight both tags and IOCs in the content
             display_line = self._safe_truncate(line, self.width - 6)
-            x_pos = 4
-
-            # Extract IOCs and tags from the line
-            from .models import Note
-            import re
             
-            iocs_found = Note.extract_iocs_from_text(display_line)
-            tags_pattern = r'#\w+'
-            tags_found = [(match.group(), match.start()) for match in re.finditer(tags_pattern, display_line)]
-            
-            # Combine IOCs and tags into a list of (text, start_pos, type)
-            highlights = []
-            for ioc, _ in iocs_found:
-                pos = display_line.find(ioc)
-                if pos != -1:
-                    highlights.append((ioc, pos, 'ioc'))
-            for tag, pos in tags_found:
-                highlights.append((tag, pos, 'tag'))
-            
-            # Sort by position
-            highlights.sort(key=lambda x: x[1])
-            
-            if highlights:
-                # Display with highlighting
-                remaining = display_line
-                for i, (text, orig_pos, htype) in enumerate(highlights):
-                    # Find position in remaining text
-                    pos = remaining.find(text)
-                    if pos == -1:
-                        continue
-                    
-                    # Print text before highlight
-                    if pos > 0:
-                        try:
-                            self.stdscr.addstr(current_y, x_pos, remaining[:pos])
-                            x_pos += pos
-                        except curses.error:
-                            break
-                    
-                    # Print highlighted text
-                    try:
-                        if htype == 'ioc':
-                            self.stdscr.addstr(current_y, x_pos, text, curses.color_pair(4))
-                        else:  # tag
-                            self.stdscr.addstr(current_y, x_pos, text, curses.color_pair(3))
-                        x_pos += len(text)
-                    except curses.error:
-                        break
-                    
-                    # Update remaining text
-                    remaining = remaining[pos + len(text):]
-                
-                # Print any remaining text
-                if remaining and x_pos < self.width - 2:
-                    try:
-                        self.stdscr.addstr(current_y, x_pos, remaining[:self.width - x_pos - 2])
-                    except curses.error:
-                        pass
-            else:
-                # No highlights, display normally
-                try:
-                    self.stdscr.addstr(current_y, x_pos, display_line)
-                except curses.error:
-                    pass
+            # Display with highlighting (no selection in detail view)
+            try:
+                self._display_line_with_highlights(current_y, 4, display_line, is_selected=False)
+            except curses.error:
+                pass
 
             current_y += 1
 
@@ -1269,24 +1310,10 @@ class TUI:
                 if self.active_case:
                     case_notes = self.active_case.notes
                     filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
-                    
-                    # Check if a note is selected
-                    if self.selected_index < len(case_notes):
-                        # Open notes view and jump to selected note
-                        self._highlight_note_idx = self.selected_index
-                        self.view_case_notes(highlight_note_index=self.selected_index)
-                        delattr(self, '_highlight_note_idx')
-                    elif self.selected_index - len(case_notes) < len(filtered):
-                        # Evidence selected - open it
-                        evidence_idx = self.selected_index - len(case_notes)
-                        self.active_evidence = filtered[evidence_idx]
-                        self.current_view = "evidence_detail"
-                        self.selected_index = 0
-                        self.scroll_offset = 0
-                    case_notes = self.active_case.notes
-                    filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
                     # Check if selecting evidence or note
+                    # Evidence items come first (indices 0 to len(filtered)-1)
+                    # Case notes come second (indices len(filtered) to len(filtered)+len(case_notes)-1)
                     if self.selected_index < len(filtered):
                         # Selected evidence - navigate to evidence detail
                         self.active_evidence = filtered[self.selected_index]
@@ -2116,14 +2143,10 @@ class TUI:
             return
 
         name = self._input_dialog("New Case - Step 2/3", "Enter descriptive name (optional):")
-        if name is None:
-            self.show_message("Case creation cancelled.")
-            return
+        # For optional fields, treat None as empty string (user pressed Enter on empty field)
 
         investigator = self._input_dialog("New Case - Step 3/3", "Enter investigator name (optional):")
-        if investigator is None:
-            self.show_message("Case creation cancelled.")
-            return
+        # For optional fields, treat None as empty string (user pressed Enter on empty field)
 
         case = Case(case_number=case_num, name=name or "", investigator=investigator or "")
         self.storage.add_case(case)
@@ -2336,6 +2359,7 @@ class TUI:
         while True:
             win = curses.newwin(h, w, y, x)
             win.keypad(True)
+            win.timeout(25)  # 25ms timeout makes ESC responsive
             win.box()
             win.addstr(1, 2, f"Notes: {self.active_case.case_number} ({len(self.active_case.notes)} total)", curses.A_BOLD)
 
@@ -2393,48 +2417,8 @@ class TUI:
                 
                 try:
                     y_pos = 3 + i
-                    if is_highlighted:
-                        # Highlight entire line for selected note
-                        win.addstr(y_pos, 2, display_line, curses.color_pair(1))
-                    else:
-                        # Check for IOCs in the line and highlight them
-                        from .models import Note
-                        iocs_found = Note.extract_iocs_from_text(display_line)
-                        
-                        if iocs_found:
-                            # Display with IOC highlighting
-                            x_pos = 2
-                            remaining = display_line
-                            while iocs_found and remaining:
-                                # Find the earliest IOC in the remaining text
-                                earliest_ioc = None
-                                earliest_pos = len(remaining)
-                                for ioc, _ in iocs_found:
-                                    pos = remaining.find(ioc)
-                                    if pos != -1 and pos < earliest_pos:
-                                        earliest_pos = pos
-                                        earliest_ioc = ioc
-                                
-                                if earliest_ioc:
-                                    # Print text before IOC
-                                    if earliest_pos > 0:
-                                        win.addstr(y_pos, x_pos, remaining[:earliest_pos])
-                                        x_pos += earliest_pos
-                                    # Print IOC in color
-                                    win.addstr(y_pos, x_pos, earliest_ioc, curses.color_pair(4))
-                                    x_pos += len(earliest_ioc)
-                                    # Update remaining text
-                                    remaining = remaining[earliest_pos + len(earliest_ioc):]
-                                    # Remove found IOC from list
-                                    iocs_found = [(ioc, t) for ioc, t in iocs_found if ioc != earliest_ioc]
-                                else:
-                                    break
-                            # Print any remaining text
-                            if remaining:
-                                win.addstr(y_pos, x_pos, remaining)
-                        else:
-                            # No IOCs, display normally
-                            win.addstr(y_pos, 2, display_line)
+                    # Use unified highlighting function
+                    self._display_line_with_highlights(y_pos, 2, display_line, is_highlighted, win)
                 except curses.error:
                     pass
 
@@ -2449,6 +2433,9 @@ class TUI:
             win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
             win.refresh()
             key = win.getch()
+            if key == -1:  # timeout, redraw
+                del win
+                continue
             del win
 
             # Handle key presses
@@ -2488,6 +2475,7 @@ class TUI:
         while True:
             win = curses.newwin(h, w, y, x)
             win.keypad(True)
+            win.timeout(25)  # 25ms timeout makes ESC responsive
             win.box()
             win.addstr(1, 2, f"Notes: {self.active_evidence.name} ({len(self.active_evidence.notes)} total)", curses.A_BOLD)
 
@@ -2545,48 +2533,8 @@ class TUI:
                 
                 try:
                     y_pos = 3 + i
-                    if is_highlighted:
-                        # Highlight entire line for selected note
-                        win.addstr(y_pos, 2, display_line, curses.color_pair(1))
-                    else:
-                        # Check for IOCs in the line and highlight them
-                        from .models import Note
-                        iocs_found = Note.extract_iocs_from_text(display_line)
-                        
-                        if iocs_found:
-                            # Display with IOC highlighting
-                            x_pos = 2
-                            remaining = display_line
-                            while iocs_found and remaining:
-                                # Find the earliest IOC in the remaining text
-                                earliest_ioc = None
-                                earliest_pos = len(remaining)
-                                for ioc, _ in iocs_found:
-                                    pos = remaining.find(ioc)
-                                    if pos != -1 and pos < earliest_pos:
-                                        earliest_pos = pos
-                                        earliest_ioc = ioc
-                                
-                                if earliest_ioc:
-                                    # Print text before IOC
-                                    if earliest_pos > 0:
-                                        win.addstr(y_pos, x_pos, remaining[:earliest_pos])
-                                        x_pos += earliest_pos
-                                    # Print IOC in color
-                                    win.addstr(y_pos, x_pos, earliest_ioc, curses.color_pair(4))
-                                    x_pos += len(earliest_ioc)
-                                    # Update remaining text
-                                    remaining = remaining[earliest_pos + len(earliest_ioc):]
-                                    # Remove found IOC from list
-                                    iocs_found = [(ioc, t) for ioc, t in iocs_found if ioc != earliest_ioc]
-                                else:
-                                    break
-                            # Print any remaining text
-                            if remaining:
-                                win.addstr(y_pos, x_pos, remaining)
-                        else:
-                            # No IOCs, display normally
-                            win.addstr(y_pos, 2, display_line)
+                    # Use unified highlighting function
+                    self._display_line_with_highlights(y_pos, 2, display_line, is_highlighted, win)
                 except curses.error:
                     pass
 
@@ -2601,6 +2549,9 @@ class TUI:
             win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
             win.refresh()
             key = win.getch()
+            if key == -1:  # timeout, redraw
+                del win
+                continue
             del win
 
             # Handle key presses

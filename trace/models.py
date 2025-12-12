@@ -161,6 +161,47 @@ class Note:
 
         return iocs
 
+    @staticmethod
+    def extract_iocs_with_positions(text):
+        """Extract IOCs with their positions for highlighting. Returns list of (text, start, end, type) tuples"""
+        import re
+        highlights = []
+        
+        # IPv4 addresses
+        for match in re.finditer(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'ipv4'))
+        
+        # IPv6 addresses
+        for match in re.finditer(r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'ipv6'))
+        
+        # URLs (check before domains)
+        for match in re.finditer(r'https?://[^\s]+', text):
+            highlights.append((match.group(), match.start(), match.end(), 'url'))
+        
+        # Domain names
+        for match in re.finditer(r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b', text):
+            if not match.group().startswith('example.'):
+                highlights.append((match.group(), match.start(), match.end(), 'domain'))
+        
+        # SHA256 hashes
+        for match in re.finditer(r'\b[a-fA-F0-9]{64}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'sha256'))
+        
+        # SHA1 hashes
+        for match in re.finditer(r'\b[a-fA-F0-9]{40}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'sha1'))
+        
+        # MD5 hashes
+        for match in re.finditer(r'\b[a-fA-F0-9]{32}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'md5'))
+        
+        # Email addresses
+        for match in re.finditer(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text):
+            highlights.append((match.group(), match.start(), match.end(), 'email'))
+        
+        return highlights
+
     def to_dict(self):
         return {
             "note_id": self.note_id,
