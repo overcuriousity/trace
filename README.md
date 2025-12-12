@@ -24,6 +24,21 @@ trace "Observed outbound connection to 192.168.1.55 on port 80. #suspicious #net
 
 ## Installation & Deployment
 
+### Quick Install from Latest Release
+
+**Linux / macOS:**
+```bash
+curl -L https://github.com/overcuriousity/trace/releases/latest/download/trace -o trace && sudo mv trace /usr/local/bin/ && sudo chmod +x /usr/local/bin/trace
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/overcuriousity/trace/releases/latest/download/trace.exe" -OutFile "$env:USERPROFILE\bin\trace.exe"; [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+```
+*Note: Create `$env:USERPROFILE\bin` directory first if it doesn't exist, then restart your shell.*
+
+---
+
 ### Platform: Linux / UNIX (including macOS)
 
 **Prerequisites:** Python 3.x and the binary build utility (PyInstaller).
