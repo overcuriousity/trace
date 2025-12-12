@@ -24,6 +24,42 @@ trace "Observed outbound connection to 192.168.1.55 on port 80. #suspicious #net
 
 ## Installation & Deployment
 
+### Quick Install from Latest Release
+
+**Linux / macOS:**
+```bash
+curl -L https://github.com/overcuriousity/trace/releases/latest/download/trace -o trace && sudo mv trace /usr/local/bin/ && sudo chmod +x /usr/local/bin/trace
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/overcuriousity/trace/releases/latest/download/trace.exe" -OutFile "$env:USERPROFILE\bin\trace.exe"; [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+```
+*Note: Create `$env:USERPROFILE\bin` directory first if it doesn't exist, then restart your shell.*
+
+**Optional: Create Ultra-Fast Alias**
+
+For maximum speed when logging, create a single-character alias:
+
+**Linux / macOS (Bash):**
+```bash
+echo 'alias t="trace"' >> ~/.bashrc && source ~/.bashrc
+```
+
+**Linux / macOS (Zsh):**
+```bash
+echo 'alias t="trace"' >> ~/.zshrc && source ~/.zshrc
+```
+
+**Windows (PowerShell):**
+```powershell
+New-Item -ItemType File -Force $PROFILE; Add-Content $PROFILE 'function t { trace $args }'; . $PROFILE
+```
+
+After this, you can log with just: `t "Your note here"`
+
+---
+
 ### Platform: Linux / UNIX (including macOS)
 
 **Prerequisites:** Python 3.x and the binary build utility (PyInstaller).
