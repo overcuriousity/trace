@@ -1298,15 +1298,14 @@ class TUI:
                 notes = self.active_evidence.notes
                 list_h = self.content_h - 5
                 display_notes = notes[-list_h:] if len(notes) > list_h else notes
-                
+
                 if display_notes and self.selected_index < len(display_notes):
-                    # Calculate the actual note index in the full list
-                    note_offset = len(notes) - len(display_notes)
-                    actual_note_index = note_offset + self.selected_index
-                    # Open notes view and jump to selected note
-                    self._highlight_note_idx = actual_note_index
-                    self.view_evidence_notes(highlight_note_index=actual_note_index)
-                    delattr(self, '_highlight_note_idx') # Reset filter on view change
+                    # Show note detail view (consistent with other views)
+                    self.current_note = display_notes[self.selected_index]
+                    self.previous_view = "evidence_detail"
+                    self.current_view = "note_detail"
+                    self.selected_index = 0
+                    self.scroll_offset = 0
             elif self.current_view == "case_detail":
                 if self.active_case:
                     case_notes = self.active_case.notes
