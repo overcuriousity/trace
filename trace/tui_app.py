@@ -2213,9 +2213,9 @@ class TUI:
         options = ["GPG Signing", "Select GPG Key", "Save", "Cancel"]
 
         curses.curs_set(0)
-        h = 12
+        h = 15  # Increased from 12 to properly show all 4 options + footer
         w = 60
-        y = self.height // 2 - 6
+        y = self.height // 2 - 7  # Adjusted to keep centered
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
