@@ -33,6 +33,9 @@ class TUI:
         self.filter_mode = False
         self.filter_query = ""
 
+        # Navigation history - remembers selected indices when navigating between views
+        self.nav_history = {}  # Maps (view, case_id, evidence_id) -> selected_index
+
         # Flash Message
         self.flash_message = ""
         self.flash_time = 0
@@ -114,6 +117,21 @@ class TUI:
     def show_message(self, msg):
         self.flash_message = msg
         self.flash_time = time.time()
+
+    def _save_nav_position(self):
+        """Save current navigation position before changing views"""
+        # Create a key based on current view and context
+        case_id = self.active_case.case_id if self.active_case else None
+        evidence_id = self.active_evidence.evidence_id if self.active_evidence else None
+        key = (self.current_view, case_id, evidence_id)
+        self.nav_history[key] = self.selected_index
+
+    def _restore_nav_position(self, view, case=None, evidence=None):
+        """Restore navigation position for a view"""
+        case_id = case.case_id if case else None
+        evidence_id = evidence.evidence_id if evidence else None
+        key = (view, case_id, evidence_id)
+        return self.nav_history.get(key, 0)
 
     def _get_all_tags_with_counts(self, notes):
         """Get all tags from notes with their occurrence counts"""
@@ -203,9 +221,12 @@ class TUI:
             self.show_message("No tags found in notes.")
             return
 
+        # Save position before switching view
+        self._save_nav_position()
+
         # Switch to tags list view
         self.current_view = "tags_list"
-        self.selected_index = 0
+        self.selected_index = self._restore_nav_position("tags_list", self.active_case, self.active_evidence)
         self.scroll_offset = 0
 
     def handle_open_iocs(self):
@@ -227,9 +248,12 @@ class TUI:
             self.show_message("No IOCs found in notes.")
             return
 
+        # Save position before switching view
+        self._save_nav_position()
+
         # Switch to IOCs list view
         self.current_view = "ioc_list"
-        self.selected_index = 0
+        self.selected_index = self._restore_nav_position("ioc_list", self.active_case, self.active_evidence)
         self.scroll_offset = 0
 
     def _safe_truncate(self, text, max_width, ellipsis="..."):
@@ -1385,9 +1409,10 @@ class TUI:
             if self.current_view == "case_list":
                 filtered = self._get_filtered_list(self.cases, "case_number", "name")
                 if filtered:
+                    self._save_nav_position()
                     self.active_case = filtered[self.selected_index]
                     self.current_view = "case_detail"
-                    self.selected_index = 0
+                    self.selected_index = self._restore_nav_position("case_detail", self.active_case)
                     self.scroll_offset = 0
                     self.filter_query = ""
             elif self.current_view == "evidence_detail" and self.active_evidence:
@@ -1398,6 +1423,7 @@ class TUI:
 
                 if display_notes and self.selected_index < len(display_notes):
                     # Show note detail view (consistent with other views)
+                    self._save_nav_position()
                     self.current_note = display_notes[self.selected_index]
                     self.previous_view = "evidence_detail"
                     self.current_view = "note_detail"
@@ -1413,12 +1439,14 @@ class TUI:
                     # Case notes come second (indices len(filtered) to len(filtered)+len(case_notes)-1)
                     if self.selected_index < len(filtered):
                         # Selected evidence - navigate to evidence detail
+                        self._save_nav_position()
                         self.active_evidence = filtered[self.selected_index]
                         self.current_view = "evidence_detail"
-                        self.selected_index = 0
+                        self.selected_index = self._restore_nav_position("evidence_detail", self.active_case, self.active_evidence)
                         self.filter_query = ""
                     elif case_notes and self.selected_index - len(filtered) < len(case_notes):
                         # Selected a note - show note detail view
+                        self._save_nav_position()
                         note_idx = self.selected_index - len(filtered)
                         self.current_note = case_notes[note_idx]
                         self.previous_view = "case_detail"
@@ -1431,6 +1459,7 @@ class TUI:
                     q = self.filter_query.lower()
                     tags_to_show = [(tag, count) for tag, count in self.current_tags if q in tag.lower()]
                 if tags_to_show and self.selected_index < len(tags_to_show):
+                    self._save_nav_position()
                     tag, _ = tags_to_show[self.selected_index]
                     self.current_tag = tag
                     # Get all notes (case + evidence if in case view, or just evidence if in evidence view)
@@ -1445,6 +1474,7 @@ class TUI:
                 # Enter note -> show expanded view (respect filter if active)
                 notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
                 if notes_to_show and self.selected_index < len(notes_to_show):
+                    self._save_nav_position()
                     self.current_note = notes_to_show[self.selected_index]
                     self.previous_view = "tag_notes_list"
                     self.current_view = "note_detail"
@@ -1458,6 +1488,7 @@ class TUI:
                     iocs_to_show = [(ioc, count, ioc_type) for ioc, count, ioc_type in self.current_iocs
                                    if q in ioc.lower() or q in ioc_type.lower()]
                 if iocs_to_show and self.selected_index < len(iocs_to_show):
+                    self._save_nav_position()
                     ioc, _, _ = iocs_to_show[self.selected_index]
                     self.current_ioc = ioc
                     # Get all notes from current context
@@ -1472,6 +1503,7 @@ class TUI:
                 # Enter note -> show expanded view (respect filter if active)
                 notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
                 if notes_to_show and self.selected_index < len(notes_to_show):
+                    self._save_nav_position()
                     self.current_note = notes_to_show[self.selected_index]
                     self.previous_view = "ioc_notes_list"
                     self.current_view = "note_detail"
@@ -1483,54 +1515,58 @@ class TUI:
             if self.current_view == "help":
                 # Return to previous view
                 self.current_view = getattr(self, 'previous_view', 'case_list')
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position(self.current_view, self.active_case, self.active_evidence)
                 self.scroll_offset = 0
             elif self.current_view == "note_detail":
                 # Return to the view we came from
-                self.current_view = getattr(self, 'previous_view', 'case_detail')
+                prev_view = getattr(self, 'previous_view', 'case_detail')
+                self.current_view = prev_view
                 self.current_note = None
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position(prev_view, self.active_case, self.active_evidence)
                 self.scroll_offset = 0
             elif self.current_view == "tag_notes_list":
                 self.current_view = "tags_list"
                 self.tag_notes = []
                 self.current_tag = None
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position("tags_list", self.active_case, self.active_evidence)
                 self.scroll_offset = 0
             elif self.current_view == "ioc_notes_list":
                 self.current_view = "ioc_list"
                 self.ioc_notes = []
                 self.current_ioc = None
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position("ioc_list", self.active_case, self.active_evidence)
                 self.scroll_offset = 0
             elif self.current_view == "ioc_list":
                 # Go back to the view we came from (case_detail or evidence_detail)
                 if self.active_evidence:
                     self.current_view = "evidence_detail"
+                    self.selected_index = self._restore_nav_position("evidence_detail", self.active_case, self.active_evidence)
                 elif self.active_case:
                     self.current_view = "case_detail"
+                    self.selected_index = self._restore_nav_position("case_detail", self.active_case)
                 self.current_iocs = []
-                self.selected_index = 0
                 self.scroll_offset = 0
             elif self.current_view == "tags_list":
                 # Go back to the view we came from (case_detail or evidence_detail)
                 if self.active_evidence:
                     self.current_view = "evidence_detail"
+                    self.selected_index = self._restore_nav_position("evidence_detail", self.active_case, self.active_evidence)
                 elif self.active_case:
                     self.current_view = "case_detail"
+                    self.selected_index = self._restore_nav_position("case_detail", self.active_case)
                 self.current_tags = []
-                self.selected_index = 0
                 self.scroll_offset = 0
             elif self.current_view == "evidence_detail":
                 self.current_view = "case_detail"
+                temp_case = self.active_case
                 self.active_evidence = None
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position("case_detail", temp_case)
                 self.scroll_offset = 0
                 self.filter_query = ""
             elif self.current_view == "case_detail":
                 self.current_view = "case_list"
                 self.active_case = None
-                self.selected_index = 0
+                self.selected_index = self._restore_nav_position("case_list")
                 self.scroll_offset = 0
                 self.filter_query = ""
 
