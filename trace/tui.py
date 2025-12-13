@@ -1454,7 +1454,19 @@ class TUI:
             if self.current_view == "case_detail":
                 self.view_case_notes()
             elif self.current_view == "evidence_detail":
-                self.view_evidence_notes()
+                # Open notes modal with selected note highlighted
+                if self.active_evidence:
+                    notes = self.active_evidence.notes
+                    list_h = self.content_h - 5
+                    display_notes = notes[-list_h:] if len(notes) > list_h else notes
+
+                    if display_notes and self.selected_index < len(display_notes):
+                        # Calculate the actual note index in the full list
+                        note_offset = len(notes) - len(display_notes)
+                        actual_note_index = note_offset + self.selected_index
+                        self.view_evidence_notes(highlight_note_index=actual_note_index)
+                    else:
+                        self.view_evidence_notes()
 
         # Delete
         elif key == ord('d'):
