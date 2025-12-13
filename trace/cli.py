@@ -49,12 +49,13 @@ def quick_add_note(content: str):
     note.extract_tags()  # Extract hashtags from content
     note.extract_iocs()  # Extract IOCs from content
 
-    # Try signing if enabled
+    # Try signing the hash if enabled
     signature = None
     if settings.get("pgp_enabled", True):
         gpg_key_id = settings.get("gpg_key_id", None)
         if gpg_key_id:
-            signature = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id)
+            # Sign only the hash (hash already includes timestamp:content for integrity)
+            signature = Crypto.sign_content(note.content_hash, key_id=gpg_key_id)
             if signature:
                 note.signature = signature
             else:
@@ -169,9 +170,9 @@ def format_note_for_export(note: Note) -> str:
     # Properly indent multi-line content
     for line in note.content.splitlines():
         lines.append(f"    {line}\n")
-    lines.append(f"  - Hash: `{note.content_hash}`\n")
+    lines.append(f"  - SHA256 Hash (timestamp:content): `{note.content_hash}`\n")
     if note.signature:
-        lines.append("  - **Individual Note Signature:**\n")
+        lines.append("  - **GPG Signature of Hash:**\n")
         lines.append("    ```\n")
         # Indent signature for markdown block
         for line in note.signature.splitlines():

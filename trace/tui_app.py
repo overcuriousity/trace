@@ -1346,10 +1346,20 @@ class TUI:
         help_lines.append(("                   Highlighted in red in full note views", curses.A_DIM))
         help_lines.append(("  Note Navigation  Press Enter on any note to view with highlighting", curses.A_NORMAL))
         help_lines.append(("                   Selected note auto-centered and highlighted", curses.A_DIM))
-        help_lines.append(("  Integrity        All notes SHA256 hashed + optional GPG signing", curses.A_NORMAL))
-        help_lines.append(("  GPG Settings     Press 's' to toggle signing & select GPG key", curses.A_NORMAL))
         help_lines.append(("  Source Hash      Store evidence file hashes for chain of custody", curses.A_NORMAL))
         help_lines.append(("  Export           Run: trace --export --output report.md", curses.A_DIM))
+        help_lines.append(("", curses.A_NORMAL))
+
+        # Cryptographic Integrity
+        help_lines.append(("CRYPTOGRAPHIC INTEGRITY", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("  Layer 1: Notes   SHA256(timestamp:content) proves integrity", curses.A_NORMAL))
+        help_lines.append(("                   GPG signature of hash proves authenticity", curses.A_DIM))
+        help_lines.append(("  Layer 2: Export  Entire export document GPG-signed", curses.A_NORMAL))
+        help_lines.append(("                   Dual verification: individual + document level", curses.A_DIM))
+        help_lines.append(("  Verification     ✓=verified  ✗=failed  ?=unsigned", curses.A_NORMAL))
+        help_lines.append(("                   Press 'v' on note detail for verification info", curses.A_DIM))
+        help_lines.append(("  GPG Settings     Press 's' to toggle signing & select GPG key", curses.A_NORMAL))
+        help_lines.append(("  External Verify  gpg --verify exported-file.md", curses.A_DIM))
         help_lines.append(("", curses.A_NORMAL))
 
         # Data Location
@@ -2622,7 +2632,8 @@ class TUI:
 
         signed = False
         if pgp_enabled:
-            sig = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id or "")
+            # Sign only the hash (hash already includes timestamp:content for integrity)
+            sig = Crypto.sign_content(note.content_hash, key_id=gpg_key_id or "")
             if sig:
                 note.signature = sig
                 signed = True
