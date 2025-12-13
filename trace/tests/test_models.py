@@ -21,7 +21,8 @@ class TestModels(unittest.TestCase):
 class TestStorage(unittest.TestCase):
     def setUp(self):
         self.test_dir = Path(tempfile.mkdtemp())
-        self.storage = Storage(app_dir=self.test_dir)
+        # Disable lock for tests to allow multiple Storage instances
+        self.storage = Storage(app_dir=self.test_dir, acquire_lock=False)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -31,7 +32,7 @@ class TestStorage(unittest.TestCase):
         self.storage.add_case(case)
 
         # Reload storage from same dir
-        new_storage = Storage(app_dir=self.test_dir)
+        new_storage = Storage(app_dir=self.test_dir, acquire_lock=False)
         loaded_case = new_storage.get_case(case.case_id)
 
         self.assertIsNotNone(loaded_case)
