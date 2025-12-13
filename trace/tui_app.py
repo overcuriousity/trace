@@ -118,6 +118,73 @@ class TUI:
         self.flash_message = msg
         self.flash_time = time.time()
 
+    def verify_note_signature(self):
+        """Show detailed verification dialog for current note"""
+        if not self.current_note:
+            return
+
+        verified, info = self.current_note.verify_signature()
+
+        # Prepare dialog content
+        if not self.current_note.signature:
+            title = "Note Signature Status"
+            message = [
+                "This note is unsigned.",
+                "",
+                "To sign notes, enable GPG signing in settings",
+                "and ensure you have a GPG key configured."
+            ]
+        elif verified:
+            title = "✓ Signature Verified"
+            message = [
+                "The note's signature is valid.",
+                "",
+                f"Signed by: {info}",
+                "",
+                "This note has not been tampered with since signing."
+            ]
+        else:
+            title = "✗ Signature Verification Failed"
+            message = [
+                "The note's signature could not be verified.",
+                "",
+                f"Reason: {info}",
+                "",
+                "Possible causes:",
+                "- Public key not in keyring",
+                "- Note content was modified after signing",
+                "- Signature is corrupted"
+            ]
+
+        # Display dialog (reuse pattern from other dialogs)
+        h, w = self.stdscr.getmaxyx()
+        dialog_h = min(len(message) + 6, h - 4)
+        dialog_w = min(max(len(line) for line in [title] + message) + 6, w - 4)
+        start_y = (h - dialog_h) // 2
+        start_x = (w - dialog_w) // 2
+
+        # Create dialog window
+        dialog = curses.newwin(dialog_h, dialog_w, start_y, start_x)
+        dialog.box()
+
+        # Title
+        dialog.attron(curses.A_BOLD)
+        title_x = (dialog_w - len(title)) // 2
+        dialog.addstr(1, title_x, title)
+        dialog.attroff(curses.A_BOLD)
+
+        # Message
+        for i, line in enumerate(message):
+            dialog.addstr(3 + i, 2, line)
+
+        # Footer
+        footer = "Press any key to close"
+        footer_x = (dialog_w - len(footer)) // 2
+        dialog.addstr(dialog_h - 2, footer_x, footer, curses.color_pair(3))
+
+        dialog.refresh()
+        dialog.getch()
+
     def _save_nav_position(self):
         """Save current navigation position before changing views"""
         # Create a key based on current view and context
@@ -290,6 +357,22 @@ class TUI:
             truncated = truncated[:-1]
 
         return ellipsis[:max_width]
+
+    def _get_verification_symbol(self, note):
+        """
+        Get verification symbol for a note: ✓ (verified), ✗ (failed), ? (unsigned)
+
+        Args:
+            note: The Note object to check
+
+        Returns:
+            str: Verification symbol
+        """
+        if not note.signature:
+            return "?"
+
+        verified, _ = note.verify_signature()
+        return "✓" if verified else "✗"
 
     def _display_line_with_highlights(self, y, x_start, line, is_selected=False, win=None):
         """
@@ -823,7 +906,9 @@ class TUI:
 
                 # Format note content
                 note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-                display_str = f"- {note_content}"
+                # Add verification symbol
+                verify_symbol = self._get_verification_symbol(note)
+                display_str = f"{verify_symbol} {note_content}"
                 display_str = self._safe_truncate(display_str, self.width - 6)
 
                 # Display with smart highlighting (IOCs take priority over selection)
@@ -888,7 +973,9 @@ class TUI:
             note = notes[idx]
             # Replace newlines with spaces for single-line display
             note_content = note.content.replace('\n', ' ').replace('\r', ' ')
-            display_str = f"- {note_content}"
+            # Add verification symbol
+            verify_symbol = self._get_verification_symbol(note)
+            display_str = f"{verify_symbol} {note_content}"
             # Truncate safely for Unicode
             display_str = self._safe_truncate(display_str, self.width - 6)
 
@@ -982,7 +1069,9 @@ class TUI:
             if len(content_preview) > 50:
                 content_preview = content_preview[:50] + "..."
 
-            display_str = f"[{timestamp_str}] {content_preview}"
+            # Add verification symbol
+            verify_symbol = self._get_verification_symbol(note)
+            display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
             display_str = self._safe_truncate(display_str, self.width - 6)
 
             if idx == self.selected_index:
@@ -1080,7 +1169,9 @@ class TUI:
             timestamp_str = time.ctime(note.timestamp)
             content_preview = note.content[:60].replace('\n', ' ') + "..." if len(note.content) > 60 else note.content.replace('\n', ' ')
 
-            display_str = f"[{timestamp_str}] {content_preview}"
+            # Add verification symbol
+            verify_symbol = self._get_verification_symbol(note)
+            display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
             display_str = self._safe_truncate(display_str, self.width - 6)
 
             if idx == self.selected_index:
@@ -1150,12 +1241,26 @@ class TUI:
             self.stdscr.addstr(current_y, 2, f"Hash: {hash_display}", curses.A_DIM)
             current_y += 1
 
-        # Signature
+        # Signature and verification status
         if self.current_note.signature:
-            self.stdscr.addstr(current_y, 2, "Signature: [GPG signed]", curses.color_pair(2))
+            verified, info = self.current_note.verify_signature()
+            if verified:
+                sig_display = f"Signature: ✓ Verified ({info})"
+                self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(2))
+            else:
+                if info == "unsigned":
+                    sig_display = "Signature: ? Unsigned"
+                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(3))
+                else:
+                    sig_display = f"Signature: ✗ Failed ({info})"
+                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(4))
+            current_y += 1
+        else:
+            # No signature present
+            self.stdscr.addstr(current_y, 2, "Signature: ? Unsigned", curses.color_pair(3))
             current_y += 1
 
-        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back  [v] Verify", curses.color_pair(3))
 
     def draw_help(self):
         """Draw the help screen with keyboard shortcuts and features"""
@@ -1633,6 +1738,10 @@ class TUI:
                             self.view_evidence_notes()
                     else:
                         self.view_evidence_notes()
+            elif self.current_view == "note_detail":
+                # Verify signature in note detail view
+                if self.current_note:
+                    self.verify_note_signature()
 
         # Delete
         elif key == ord('d'):

@@ -3,6 +3,93 @@ import hashlib
 
 class Crypto:
     @staticmethod
+    def is_gpg_available() -> bool:
+        """
+        Check if GPG is available on the system.
+
+        Returns:
+            True if GPG is available, False otherwise.
+        """
+        try:
+            proc = subprocess.Popen(
+                ['gpg', '--version'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate(timeout=5)
+            return proc.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    @staticmethod
+    def verify_signature(signed_content: str) -> tuple[bool, str]:
+        """
+        Verify a GPG clearsigned message.
+
+        Args:
+            signed_content: The clearsigned content to verify
+
+        Returns:
+            A tuple of (verified: bool, signer_info: str)
+            - verified: True if signature is valid, False otherwise
+            - signer_info: Information about the signer (key ID, name) or error message
+        """
+        if not signed_content or not signed_content.strip():
+            return False, "No signature present"
+
+        # Check if content looks like a GPG signed message
+        if "-----BEGIN PGP SIGNED MESSAGE-----" not in signed_content:
+            return False, "Not a GPG signed message"
+
+        try:
+            proc = subprocess.Popen(
+                ['gpg', '--verify'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate(input=signed_content, timeout=10)
+
+            if proc.returncode == 0:
+                # Parse signer info from stderr (GPG outputs verification info to stderr)
+                signer_info = "Unknown signer"
+                for line in stderr.split('\n'):
+                    if "Good signature from" in line:
+                        # Extract the signer name/email
+                        parts = line.split('"')
+                        if len(parts) >= 2:
+                            signer_info = parts[1]
+                        break
+                    elif "using" in line:
+                        # Try to get key ID
+                        if "key" in line.lower():
+                            signer_info = line.strip()
+
+                return True, signer_info
+            else:
+                # Signature verification failed
+                error_msg = "Verification failed"
+                for line in stderr.split('\n'):
+                    if "BAD signature" in line:
+                        error_msg = "BAD signature"
+                        break
+                    elif "no public key" in line or "public key not found" in line:
+                        error_msg = "Public key not found in keyring"
+                        break
+                    elif "Can't check signature" in line:
+                        error_msg = "Cannot check signature"
+                        break
+
+                return False, error_msg
+
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False, "GPG not available or timeout"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+    @staticmethod
     def list_gpg_keys():
         """
         List available GPG secret keys.

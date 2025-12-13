@@ -161,6 +161,10 @@ def main():
         quick_add_note(args.note)
         return
 
+    # Check for first run and run GPG wizard if needed
+    from .gpg_wizard import check_and_run_wizard
+    check_and_run_wizard()
+
     # Launch TUI (with optional direct navigation to active context)
     try:
         from .tui_app import run_tui
