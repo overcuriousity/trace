@@ -64,7 +64,12 @@ class TUI:
 
         self.height, self.width = stdscr.getmaxyx()
 
-        # Load initial active state
+        # Load initial active state and validate
+        warning = self.state_manager.validate_and_clear_stale(self.storage)
+        if warning:
+            self.flash_message = warning
+            self.flash_time = time.time()
+
         active_state = self.state_manager.get_active()
         self.global_active_case_id = active_state.get("case_id")
         self.global_active_evidence_id = active_state.get("evidence_id")
@@ -445,14 +450,35 @@ class TUI:
 
     def _update_scroll(self, total_items):
         # Viewport height calculation (approximate lines available for list)
-        list_h = self.content_h - 2 # Title + padding
-        if list_h < 1: list_h = 1
+        # Protect against negative or zero content_h
+        if self.content_h < 3:
+            # Terminal too small, use minimum viable height
+            list_h = 1
+        else:
+            list_h = self.content_h - 2 # Title + padding
+            if list_h < 1:
+                list_h = 1
 
-        # Ensure selected index is visible
-        if self.selected_index < self.scroll_offset:
-            self.scroll_offset = self.selected_index
-        elif self.selected_index >= self.scroll_offset + list_h:
-            self.scroll_offset = self.selected_index - list_h + 1
+        # Ensure selected index is within bounds
+        if total_items == 0:
+            self.selected_index = 0
+            self.scroll_offset = 0
+        else:
+            # Clamp selected_index to valid range
+            if self.selected_index >= total_items:
+                self.selected_index = max(0, total_items - 1)
+            if self.selected_index < 0:
+                self.selected_index = 0
+
+            # Ensure selected index is visible
+            if self.selected_index < self.scroll_offset:
+                self.scroll_offset = self.selected_index
+            elif self.selected_index >= self.scroll_offset + list_h:
+                self.scroll_offset = self.selected_index - list_h + 1
+
+            # Ensure scroll_offset is within bounds
+            if self.scroll_offset < 0:
+                self.scroll_offset = 0
 
         return list_h
 
@@ -819,21 +845,23 @@ class TUI:
         self.stdscr.addstr(current_y, 2, f"Notes ({len(notes)}):", curses.A_UNDERLINE)
         current_y += 1
 
-        # Just show last N notes that fit
+        # Calculate available height for notes list
         list_h = self.content_h - (current_y - 2)  # Adjust for dynamic header
+        if list_h < 1:
+            list_h = 1
         start_y = current_y
 
-        display_notes = notes[-list_h:] if len(notes) > list_h else notes
+        # Update scroll to keep selection visible (use full notes list)
+        if notes:
+            self._update_scroll(len(notes))
 
-        # Update scroll for note selection
-        if display_notes:
-            self._update_scroll(len(display_notes))
-
-        for i, note in enumerate(display_notes):
+        # Display notes with proper scrolling
+        for i in range(list_h):
             idx = self.scroll_offset + i
-            if idx >= len(display_notes):
+            if idx >= len(notes):
                 break
-            note = display_notes[idx]
+
+            note = notes[idx]
             # Replace newlines with spaces for single-line display
             note_content = note.content.replace('\n', ' ').replace('\r', ' ')
             display_str = f"- {note_content}"
@@ -1582,21 +1610,74 @@ class TUI:
             self.filter_query = ""
             self.selected_index = 0
             self.scroll_offset = 0
+            # Validate selected_index against the unfiltered list
+            self._validate_selection_bounds()
             return True
         elif key == curses.KEY_ENTER or key in [10, 13]:
             self.filter_mode = False
-            self.selected_index = 0
+            # Validate selected_index against the filtered list
+            self._validate_selection_bounds()
             self.scroll_offset = 0
             return True
         elif key == curses.KEY_BACKSPACE or key == 127:
             if len(self.filter_query) > 0:
                 self.filter_query = self.filter_query[:-1]
                 self.selected_index = 0
+                self.scroll_offset = 0
         elif 32 <= key <= 126:
             self.filter_query += chr(key)
             self.selected_index = 0
+            self.scroll_offset = 0
 
         return True
+
+    def _validate_selection_bounds(self):
+        """Validate and fix selected_index and scroll_offset to ensure they're within bounds"""
+        max_idx = 0
+        if self.current_view == "case_list":
+            filtered = self._get_filtered_list(self.cases, "case_number", "name")
+            max_idx = len(filtered) - 1
+        elif self.current_view == "case_detail" and self.active_case:
+            case_notes = self.active_case.notes
+            filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
+            max_idx = len(filtered) + len(case_notes) - 1
+        elif self.current_view == "evidence_detail" and self.active_evidence:
+            notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
+            max_idx = len(notes) - 1
+        elif self.current_view == "tags_list":
+            tags_to_show = self.current_tags
+            if self.filter_query:
+                q = self.filter_query.lower()
+                tags_to_show = [(tag, count) for tag, count in self.current_tags if q in tag.lower()]
+            max_idx = len(tags_to_show) - 1
+        elif self.current_view == "tag_notes_list":
+            notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
+            max_idx = len(notes_to_show) - 1
+        elif self.current_view == "ioc_list":
+            iocs_to_show = self.current_iocs
+            if self.filter_query:
+                q = self.filter_query.lower()
+                iocs_to_show = [(ioc, count, ioc_type) for ioc, count, ioc_type in self.current_iocs
+                               if q in ioc.lower() or q in ioc_type.lower()]
+            max_idx = len(iocs_to_show) - 1
+        elif self.current_view == "ioc_notes_list":
+            notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
+            max_idx = len(notes_to_show) - 1
+
+        # Ensure max_idx is at least 0
+        max_idx = max(0, max_idx)
+
+        # Fix selected_index if out of bounds
+        if self.selected_index > max_idx:
+            self.selected_index = max_idx
+        if self.selected_index < 0:
+            self.selected_index = 0
+
+        # Fix scroll_offset if out of bounds
+        if self.scroll_offset > self.selected_index:
+            self.scroll_offset = max(0, self.selected_index)
+        if self.scroll_offset < 0:
+            self.scroll_offset = 0
 
     def _handle_set_active(self):
         if self.current_view == "case_list":
@@ -2477,24 +2558,21 @@ class TUI:
                 self.show_message("No notes to delete.")
                 return
 
-            # Calculate which note to delete based on display (showing last N filtered notes)
+            # Get filtered notes (or all notes if no filter)
             notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
-            list_h = self.content_h - 5  # Adjust for header
-            display_notes = notes[-list_h:] if len(notes) > list_h else notes
 
-            if display_notes:
-                # User selection is in context of displayed notes
-                # We need to delete from the full list
-                if self.selected_index < len(display_notes):
-                    note_to_del = display_notes[self.selected_index]
-                    # Show preview of note content in confirmation
-                    preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
-                    if self.dialog_confirm(f"Delete note: '{preview}'?"):
-                        self.active_evidence.notes.remove(note_to_del)
-                        self.storage.save_data()
-                        self.selected_index = 0
-                        self.scroll_offset = 0
-                        self.show_message("Note deleted.")
+            if notes and self.selected_index < len(notes):
+                note_to_del = notes[self.selected_index]
+                # Show preview of note content in confirmation
+                preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
+                if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                    self.active_evidence.notes.remove(note_to_del)
+                    self.storage.save_data()
+                    # Adjust selected index if needed
+                    if self.selected_index >= len(notes) - 1:
+                        self.selected_index = max(0, len(notes) - 2)
+                    self.scroll_offset = max(0, min(self.scroll_offset, self.selected_index))
+                    self.show_message("Note deleted.")
 
         elif self.current_view == "note_detail":
             # Delete the currently viewed note
@@ -2503,18 +2581,25 @@ class TUI:
 
             preview = self.current_note.content[:50] + "..." if len(self.current_note.content) > 50 else self.current_note.content
             if self.dialog_confirm(f"Delete note: '{preview}'?"):
-                # Find and delete the note from its parent (case or evidence)
+                # Find and delete the note from its parent (case or evidence) using note_id
                 deleted = False
+                note_id = self.current_note.note_id
                 # Check all cases and their evidence for this note
                 for case in self.cases:
-                    if self.current_note in case.notes:
-                        case.notes.remove(self.current_note)
-                        deleted = True
+                    for note in case.notes:
+                        if note.note_id == note_id:
+                            case.notes.remove(note)
+                            deleted = True
+                            break
+                    if deleted:
                         break
                     for ev in case.evidence:
-                        if self.current_note in ev.notes:
-                            ev.notes.remove(self.current_note)
-                            deleted = True
+                        for note in ev.notes:
+                            if note.note_id == note_id:
+                                ev.notes.remove(note)
+                                deleted = True
+                                break
+                        if deleted:
                             break
                     if deleted:
                         break
@@ -2539,17 +2624,24 @@ class TUI:
             note_to_del = notes_to_show[self.selected_index]
             preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
             if self.dialog_confirm(f"Delete note: '{preview}'?"):
-                # Find and delete the note from its parent
+                # Find and delete the note from its parent using note_id
                 deleted = False
+                note_id = note_to_del.note_id
                 for case in self.cases:
-                    if note_to_del in case.notes:
-                        case.notes.remove(note_to_del)
-                        deleted = True
+                    for note in case.notes:
+                        if note.note_id == note_id:
+                            case.notes.remove(note)
+                            deleted = True
+                            break
+                    if deleted:
                         break
                     for ev in case.evidence:
-                        if note_to_del in ev.notes:
-                            ev.notes.remove(note_to_del)
-                            deleted = True
+                        for note in ev.notes:
+                            if note.note_id == note_id:
+                                ev.notes.remove(note)
+                                deleted = True
+                                break
+                        if deleted:
                             break
                     if deleted:
                         break
@@ -2557,9 +2649,9 @@ class TUI:
                 if deleted:
                     self.storage.save_data()
                     # Remove from tag_notes list as well
-                    self.tag_notes.remove(note_to_del)
+                    self.tag_notes = [n for n in self.tag_notes if n.note_id != note_id]
                     self.selected_index = min(self.selected_index, len(self.tag_notes) - 1) if self.tag_notes else 0
-                    self.scroll_offset = 0
+                    self.scroll_offset = max(0, min(self.scroll_offset, self.selected_index))
                     self.show_message("Note deleted.")
                 else:
                     self.show_message("Error: Note not found.")
@@ -2573,17 +2665,24 @@ class TUI:
             note_to_del = notes_to_show[self.selected_index]
             preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
             if self.dialog_confirm(f"Delete note: '{preview}'?"):
-                # Find and delete the note from its parent
+                # Find and delete the note from its parent using note_id
                 deleted = False
+                note_id = note_to_del.note_id
                 for case in self.cases:
-                    if note_to_del in case.notes:
-                        case.notes.remove(note_to_del)
-                        deleted = True
+                    for note in case.notes:
+                        if note.note_id == note_id:
+                            case.notes.remove(note)
+                            deleted = True
+                            break
+                    if deleted:
                         break
                     for ev in case.evidence:
-                        if note_to_del in ev.notes:
-                            ev.notes.remove(note_to_del)
-                            deleted = True
+                        for note in ev.notes:
+                            if note.note_id == note_id:
+                                ev.notes.remove(note)
+                                deleted = True
+                                break
+                        if deleted:
                             break
                     if deleted:
                         break
@@ -2591,9 +2690,9 @@ class TUI:
                 if deleted:
                     self.storage.save_data()
                     # Remove from ioc_notes list as well
-                    self.ioc_notes.remove(note_to_del)
+                    self.ioc_notes = [n for n in self.ioc_notes if n.note_id != note_id]
                     self.selected_index = min(self.selected_index, len(self.ioc_notes) - 1) if self.ioc_notes else 0
-                    self.scroll_offset = 0
+                    self.scroll_offset = max(0, min(self.scroll_offset, self.selected_index))
                     self.show_message("Note deleted.")
                 else:
                     self.show_message("Error: Note not found.")
@@ -3041,7 +3140,109 @@ def run_tui(open_active=False):
         open_active: If True, navigate directly to the active case/evidence view
     """
     def tui_wrapper(stdscr):
-        tui = TUI(stdscr)
+        try:
+            tui = TUI(stdscr)
+        except RuntimeError as e:
+            # Handle corrupted JSON data
+            error_msg = str(e)
+            if "corrupted" in error_msg.lower():
+                # Show corruption dialog
+                stdscr.clear()
+                h, w = stdscr.getmaxyx()
+
+                # Display error message
+                lines = [
+                    "╔══════════════════════════════════════════════════════════╗",
+                    "║         DATA FILE CORRUPTION DETECTED                  ║",
+                    "╚══════════════════════════════════════════════════════════╝",
+                    "",
+                    "Your data file appears to be corrupted.",
+                    "",
+                ] + error_msg.split('\n')[:5] + [
+                    "",
+                    "Options:",
+                    "  [1] Start fresh (backup already created)",
+                    "  [2] Exit and manually recover from backup",
+                    "",
+                    "Press 1 or 2 to continue..."
+                ]
+
+                start_y = max(0, (h - len(lines)) // 2)
+                for i, line in enumerate(lines):
+                    if start_y + i < h - 1:
+                        display_line = line[:w-2] if len(line) > w-2 else line
+                        try:
+                            stdscr.addstr(start_y + i, 2, display_line)
+                        except curses.error:
+                            pass
+
+                stdscr.refresh()
+
+                # Wait for user choice
+                while True:
+                    key = stdscr.getch()
+                    if key == ord('1'):
+                        # Start fresh - need to create storage with empty data
+                        from .storage import Storage, DEFAULT_APP_DIR
+                        storage = Storage.__new__(Storage)
+                        storage.app_dir = DEFAULT_APP_DIR
+                        storage.data_file = storage.app_dir / "data.json"
+                        storage.lock_file = storage.app_dir / "app.lock"
+                        storage.lock_manager = None
+                        storage._ensure_app_dir()
+                        # Acquire lock
+                        from .storage import LockManager
+                        storage.lock_manager = LockManager(storage.lock_file)
+                        if not storage.lock_manager.acquire(timeout=5):
+                            raise RuntimeError("Another instance is running")
+                        storage.start_fresh()
+
+                        # Create TUI with the fresh storage
+                        tui = TUI.__new__(TUI)
+                        tui.stdscr = stdscr
+                        tui.storage = storage
+                        tui.state_manager = StateManager()
+                        tui.current_view = "case_list"
+                        tui.selected_index = 0
+                        tui.scroll_offset = 0
+                        tui.cases = tui.storage.cases
+                        tui.active_case = None
+                        tui.active_evidence = None
+                        tui.current_tags = []
+                        tui.current_tag = None
+                        tui.tag_notes = []
+                        tui.current_note = None
+                        tui.current_iocs = []
+                        tui.current_ioc = None
+                        tui.ioc_notes = []
+                        tui.filter_mode = False
+                        tui.filter_query = ""
+                        tui.flash_message = "Started with fresh data. Backup of corrupted file was created."
+                        tui.flash_time = time.time()
+                        curses.curs_set(0)
+                        curses.start_color()
+                        if curses.has_colors():
+                            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
+                            curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+                            curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+                            curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
+                            curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
+                            curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
+                            curses.init_pair(7, curses.COLOR_BLUE, curses.COLOR_BLACK)
+                            curses.init_pair(8, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+                            curses.init_pair(9, curses.COLOR_RED, curses.COLOR_CYAN)
+                            curses.init_pair(10, curses.COLOR_YELLOW, curses.COLOR_CYAN)
+                        tui.height, tui.width = stdscr.getmaxyx()
+                        active_state = tui.state_manager.get_active()
+                        tui.global_active_case_id = active_state.get("case_id")
+                        tui.global_active_evidence_id = active_state.get("evidence_id")
+                        break
+                    elif key == ord('2') or key == ord('q'):
+                        # Exit
+                        return
+            else:
+                # Re-raise if it's a different RuntimeError
+                raise
 
         # If requested, navigate to active case/evidence
         if open_active:

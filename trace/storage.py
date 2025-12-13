@@ -1,21 +1,120 @@
 import json
 import time
+import os
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 from .models import Case, Evidence, Note
 
 DEFAULT_APP_DIR = Path.home() / ".trace"
 
+class LockManager:
+    """Cross-platform file lock manager to prevent concurrent access"""
+    def __init__(self, lock_file: Path):
+        self.lock_file = lock_file
+        self.acquired = False
+
+    def acquire(self, timeout: int = 5):
+        """Acquire lock with timeout. Returns True if successful."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to create lock file exclusively (fails if exists)
+                # Use 'x' mode which fails if file exists (atomic on most systems)
+                fd = os.open(str(self.lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                self.acquired = True
+                return True
+            except FileExistsError:
+                # Lock file exists, check if process is still alive
+                if self._is_stale_lock():
+                    # Remove stale lock and retry
+                    try:
+                        self.lock_file.unlink()
+                    except FileNotFoundError:
+                        pass
+                    continue
+                # Active lock, wait a bit
+                time.sleep(0.1)
+            except Exception:
+                # Other errors, wait and retry
+                time.sleep(0.1)
+        return False
+
+    def _is_stale_lock(self):
+        """Check if lock file is stale (process no longer exists)"""
+        try:
+            if not self.lock_file.exists():
+                return False
+            with open(self.lock_file, 'r') as f:
+                pid = int(f.read().strip())
+
+            # Check if process exists (cross-platform)
+            if sys.platform == 'win32':
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                PROCESS_QUERY_INFORMATION = 0x0400
+                handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid)
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return False
+                return True
+            else:
+                # Unix/Linux - send signal 0 to check if process exists
+                try:
+                    os.kill(pid, 0)
+                    return False  # Process exists
+                except OSError:
+                    return True  # Process doesn't exist
+        except (ValueError, FileNotFoundError, PermissionError):
+            return True
+
+    def release(self):
+        """Release the lock"""
+        if self.acquired:
+            try:
+                self.lock_file.unlink()
+            except FileNotFoundError:
+                pass
+            self.acquired = False
+
+    def __enter__(self):
+        if not self.acquire():
+            raise RuntimeError("Could not acquire lock: another instance is running")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
 class Storage:
-    def __init__(self, app_dir: Path = DEFAULT_APP_DIR):
+    def __init__(self, app_dir: Path = DEFAULT_APP_DIR, acquire_lock: bool = True):
         self.app_dir = app_dir
         self.data_file = self.app_dir / "data.json"
+        self.lock_file = self.app_dir / "app.lock"
+        self.lock_manager = None
         self._ensure_app_dir()
+
+        # Acquire lock to prevent concurrent access
+        if acquire_lock:
+            self.lock_manager = LockManager(self.lock_file)
+            if not self.lock_manager.acquire(timeout=5):
+                raise RuntimeError("Another instance of trace is already running. Please close it first.")
+
         self.cases: List[Case] = self._load_data()
 
-        # Create demo case on first launch
-        if not self.cases:
+        # Create demo case on first launch (only if data loaded successfully and is empty)
+        if not self.cases and self.data_file.exists():
+            # File exists but is empty - could be first run after successful load
+            pass
+        elif not self.cases and not self.data_file.exists():
+            # No file exists - first run
             self._create_demo_case()
+
+    def __del__(self):
+        """Release lock when Storage object is destroyed"""
+        if self.lock_manager:
+            self.lock_manager.release()
 
     def _ensure_app_dir(self):
         if not self.app_dir.exists():
@@ -169,8 +268,23 @@ Attachment: invoice.pdf.exe (double extension trick) #email-forensics #phishing-
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return [Case.from_dict(c) for c in data]
-        except (json.JSONDecodeError, IOError):
-            return []
+        except (json.JSONDecodeError, IOError, KeyError, ValueError) as e:
+            # Corrupted JSON - create backup and raise exception
+            import shutil
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = self.app_dir / f"data.json.corrupted.{timestamp}"
+            try:
+                shutil.copy2(self.data_file, backup_file)
+            except Exception:
+                pass
+            # Raise exception with information about backup
+            raise RuntimeError(f"Data file is corrupted. Backup saved to: {backup_file}\nError: {e}")
+
+    def start_fresh(self):
+        """Start with fresh data (for corrupted JSON recovery)"""
+        self.cases = []
+        self._create_demo_case()
 
     def save_data(self):
         data = [c.to_dict() for c in self.cases]
@@ -237,6 +351,37 @@ class StateManager:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return {"case_id": None, "evidence_id": None}
+
+    def validate_and_clear_stale(self, storage: 'Storage') -> str:
+        """Validate active state against storage and clear stale references.
+        Returns warning message if state was cleared, empty string otherwise."""
+        state = self.get_active()
+        case_id = state.get("case_id")
+        evidence_id = state.get("evidence_id")
+        warning = ""
+
+        if case_id:
+            case = storage.get_case(case_id)
+            if not case:
+                warning = f"Active case (ID: {case_id[:8]}...) no longer exists. Clearing active context."
+                self.set_active(None, None)
+                return warning
+
+            # Validate evidence if set
+            if evidence_id:
+                _, evidence = storage.find_evidence(evidence_id)
+                if not evidence:
+                    warning = f"Active evidence (ID: {evidence_id[:8]}...) no longer exists. Clearing to case level."
+                    self.set_active(case_id, None)
+                    return warning
+
+        elif evidence_id:
+            # Evidence set but no case - invalid state
+            warning = "Invalid state: evidence set without case. Clearing active context."
+            self.set_active(None, None)
+            return warning
+
+        return warning
 
     def get_settings(self) -> dict:
         if not self.settings_file.exists():

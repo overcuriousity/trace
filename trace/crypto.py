@@ -37,7 +37,7 @@ class Crypto:
                 elif fields[0] == 'uid' and current_key_id:
                     user_id = fields[9] if len(fields) > 9 else "Unknown"
                     keys.append((current_key_id, user_id))
-                    current_key_id = None  # Reset after matching
+                    # Don't reset current_key_id - allow multiple UIDs per key
 
             return keys
 

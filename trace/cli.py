@@ -8,6 +8,12 @@ from .crypto import Crypto
 def quick_add_note(content: str):
     storage = Storage()
     state_manager = StateManager()
+
+    # Validate and clear stale state
+    warning = state_manager.validate_and_clear_stale(storage)
+    if warning:
+        print(f"Warning: {warning}", file=sys.stderr)
+
     state = state_manager.get_active()
     settings = state_manager.get_settings()
 
@@ -15,22 +21,27 @@ def quick_add_note(content: str):
     evidence_id = state.get("evidence_id")
 
     if not case_id:
-        print("Error: No active case set. Open the TUI to select a case first.")
+        print("Error: No active case set. Open the TUI to select a case first.", file=sys.stderr)
         sys.exit(1)
 
     case = storage.get_case(case_id)
     if not case:
-        print("Error: Active case not found in storage. Ensure you have set an active case in the TUI.")
+        print("Error: Active case not found in storage. Ensure you have set an active case in the TUI.", file=sys.stderr)
         sys.exit(1)
 
     target_evidence = None
 
     if evidence_id:
-        # Find evidence
+        # Find and validate evidence belongs to active case
         for ev in case.evidence:
             if ev.evidence_id == evidence_id:
                 target_evidence = ev
                 break
+
+        if not target_evidence:
+            # Evidence ID is set but doesn't exist in case - clear it
+            print(f"Warning: Active evidence not found in case. Clearing to case level.", file=sys.stderr)
+            state_manager.set_active(case_id, None)
 
     # Create note
     note = Note(content=content)
@@ -47,9 +58,9 @@ def quick_add_note(content: str):
             if signature:
                 note.signature = signature
             else:
-                print("Warning: GPG signature failed (GPG not found or no key). Note saved without signature.")
+                print("Warning: GPG signature failed (GPG not found or no key). Note saved without signature.", file=sys.stderr)
         else:
-            print("Warning: No GPG key ID configured. Note saved without signature.")
+            print("Warning: No GPG key ID configured. Note saved without signature.", file=sys.stderr)
 
     # Attach to evidence or case
     if target_evidence:
@@ -117,7 +128,10 @@ def export_markdown(output_file: str = "export.md"):
 
 def write_note(f, note: Note):
     f.write(f"- **{time.ctime(note.timestamp)}**\n")
-    f.write(f"  - Content: {note.content}\n")
+    f.write(f"  - Content:\n")
+    # Properly indent multi-line content
+    for line in note.content.splitlines():
+        f.write(f"    {line}\n")
     f.write(f"  - Hash: `{note.content_hash}`\n")
     if note.signature:
         f.write("  - **Signature Verified:**\n")

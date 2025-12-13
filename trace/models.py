@@ -32,64 +32,67 @@ class Note:
     def extract_iocs(self):
         """Extract Indicators of Compromise from content"""
         seen = set()
+        covered_ranges = set()
         self.iocs = []
 
-        # IPv4 addresses
-        ipv4_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-        for match in re.findall(ipv4_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
+        def add_ioc_if_not_covered(match_obj):
+            """Add IOC if its range doesn't overlap with already covered ranges"""
+            start, end = match_obj.start(), match_obj.end()
+            # Check if this range overlaps with any covered range
+            for covered_start, covered_end in covered_ranges:
+                if not (end <= covered_start or start >= covered_end):
+                    return False  # Overlaps, don't add
+            text = match_obj.group()
+            if text not in seen:
+                seen.add(text)
+                covered_ranges.add((start, end))
+                self.iocs.append(text)
+                return True
+            return False
 
-        # IPv6 addresses (supports compressed format)
-        ipv6_pattern = r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{0,4}\b'
-        for match in re.findall(ipv6_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
-
-        # URLs (check before domains to prevent double-matching)
-        url_pattern = r'https?://[^\s]+'
-        for match in re.findall(url_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
-
-        # Domain names (basic pattern)
-        domain_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
-        for match in re.findall(domain_pattern, self.content):
-            # Filter out common false positives
-            if match not in seen and not match.startswith('example.'):
-                seen.add(match)
-                self.iocs.append(match)
-
-        # SHA256 hashes (64 hex chars) - check longest first
+        # Process in order of priority to avoid false positives
+        # SHA256 hashes (64 hex chars) - check longest first to avoid substring matches
         sha256_pattern = r'\b[a-fA-F0-9]{64}\b'
-        for match in re.findall(sha256_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
+        for match in re.finditer(sha256_pattern, self.content):
+            add_ioc_if_not_covered(match)
 
         # SHA1 hashes (40 hex chars)
         sha1_pattern = r'\b[a-fA-F0-9]{40}\b'
-        for match in re.findall(sha1_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
+        for match in re.finditer(sha1_pattern, self.content):
+            add_ioc_if_not_covered(match)
 
         # MD5 hashes (32 hex chars)
         md5_pattern = r'\b[a-fA-F0-9]{32}\b'
-        for match in re.findall(md5_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
+        for match in re.finditer(md5_pattern, self.content):
+            add_ioc_if_not_covered(match)
+
+        # IPv4 addresses
+        ipv4_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+        for match in re.finditer(ipv4_pattern, self.content):
+            add_ioc_if_not_covered(match)
+
+        # IPv6 addresses (supports compressed format)
+        ipv6_pattern = r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{0,4}\b'
+        for match in re.finditer(ipv6_pattern, self.content):
+            add_ioc_if_not_covered(match)
+
+        # URLs (check before domains to prevent double-matching)
+        # Fix: exclude trailing punctuation
+        url_pattern = r'https?://[^\s<>\"\']+(?<![.,;:!?\)\]\}])'
+        for match in re.finditer(url_pattern, self.content):
+            add_ioc_if_not_covered(match)
+
+        # Domain names (basic pattern)
+        domain_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+        for match in re.finditer(domain_pattern, self.content):
+            # Filter out common false positives
+            if not match.group().startswith('example.'):
+                add_ioc_if_not_covered(match)
 
         # Email addresses
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        for match in re.findall(email_pattern, self.content):
-            if match not in seen:
-                seen.add(match)
-                self.iocs.append(match)
+        for match in re.finditer(email_pattern, self.content):
+            add_ioc_if_not_covered(match)
 
     def calculate_hash(self):
         # We hash the content + timestamp to ensure integrity of 'when' it was said
@@ -101,63 +104,66 @@ class Note:
         """Extract IOCs from text and return as list of (ioc, type) tuples"""
         iocs = []
         seen = set()
+        covered_ranges = set()
 
-        # IPv4 addresses
-        ipv4_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-        for match in re.findall(ipv4_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'ipv4'))
+        def add_ioc_if_not_covered(match_obj, ioc_type):
+            """Add IOC if its range doesn't overlap with already covered ranges"""
+            start, end = match_obj.start(), match_obj.end()
+            # Check if this range overlaps with any covered range
+            for covered_start, covered_end in covered_ranges:
+                if not (end <= covered_start or start >= covered_end):
+                    return False  # Overlaps, don't add
+            ioc_text = match_obj.group()
+            if ioc_text not in seen:
+                seen.add(ioc_text)
+                covered_ranges.add((start, end))
+                iocs.append((ioc_text, ioc_type))
+                return True
+            return False
 
-        # IPv6 addresses (supports compressed format)
-        ipv6_pattern = r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{0,4}\b'
-        for match in re.findall(ipv6_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'ipv6'))
-
-        # URLs (check before domains to avoid double-matching)
-        url_pattern = r'https?://[^\s]+'
-        for match in re.findall(url_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'url'))
-
-        # Domain names (basic pattern)
-        domain_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
-        for match in re.findall(domain_pattern, text):
-            # Filter out common false positives and already seen URLs
-            if match not in seen and not match.startswith('example.'):
-                seen.add(match)
-                iocs.append((match, 'domain'))
-
-        # SHA256 hashes (64 hex chars) - check before SHA1 and MD5
+        # Process in priority order: longest hashes first
+        # SHA256 hashes (64 hex chars)
         sha256_pattern = r'\b[a-fA-F0-9]{64}\b'
-        for match in re.findall(sha256_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'sha256'))
+        for match in re.finditer(sha256_pattern, text):
+            add_ioc_if_not_covered(match, 'sha256')
 
-        # SHA1 hashes (40 hex chars) - check before MD5
+        # SHA1 hashes (40 hex chars)
         sha1_pattern = r'\b[a-fA-F0-9]{40}\b'
-        for match in re.findall(sha1_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'sha1'))
+        for match in re.finditer(sha1_pattern, text):
+            add_ioc_if_not_covered(match, 'sha1')
 
         # MD5 hashes (32 hex chars)
         md5_pattern = r'\b[a-fA-F0-9]{32}\b'
-        for match in re.findall(md5_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'md5'))
+        for match in re.finditer(md5_pattern, text):
+            add_ioc_if_not_covered(match, 'md5')
+
+        # IPv4 addresses
+        ipv4_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+        for match in re.finditer(ipv4_pattern, text):
+            add_ioc_if_not_covered(match, 'ipv4')
+
+        # IPv6 addresses (supports compressed format)
+        ipv6_pattern = r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{0,4}\b'
+        for match in re.finditer(ipv6_pattern, text):
+            add_ioc_if_not_covered(match, 'ipv6')
+
+        # URLs (check before domains to avoid double-matching)
+        # Fix: exclude trailing punctuation
+        url_pattern = r'https?://[^\s<>\"\']+(?<![.,;:!?\)\]\}])'
+        for match in re.finditer(url_pattern, text):
+            add_ioc_if_not_covered(match, 'url')
+
+        # Domain names (basic pattern)
+        domain_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+        for match in re.finditer(domain_pattern, text):
+            # Filter out common false positives
+            if not match.group().startswith('example.'):
+                add_ioc_if_not_covered(match, 'domain')
 
         # Email addresses
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        for match in re.findall(email_pattern, text):
-            if match not in seen:
-                seen.add(match)
-                iocs.append((match, 'email'))
+        for match in re.finditer(email_pattern, text):
+            add_ioc_if_not_covered(match, 'email')
 
         return iocs
 
@@ -182,6 +188,19 @@ class Note:
                 highlights.append((match.group(), start, end, ioc_type))
                 covered_ranges.add((start, end))
 
+        # Process in priority order: longest hashes first to avoid substring matches
+        # SHA256 hashes (64 hex chars)
+        for match in re.finditer(r'\b[a-fA-F0-9]{64}\b', text):
+            add_highlight(match, 'sha256')
+
+        # SHA1 hashes (40 hex chars)
+        for match in re.finditer(r'\b[a-fA-F0-9]{40}\b', text):
+            add_highlight(match, 'sha1')
+
+        # MD5 hashes (32 hex chars)
+        for match in re.finditer(r'\b[a-fA-F0-9]{32}\b', text):
+            add_highlight(match, 'md5')
+
         # IPv4 addresses
         ipv4_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
         for match in re.finditer(ipv4_pattern, text):
@@ -193,25 +212,14 @@ class Note:
             add_highlight(match, 'ipv6')
 
         # URLs (check before domains to prevent double-matching)
-        for match in re.finditer(r'https?://[^\s]+', text):
+        # Fix: exclude trailing punctuation
+        for match in re.finditer(r'https?://[^\s<>\"\']+(?<![.,;:!?\)\]\}])', text):
             add_highlight(match, 'url')
 
         # Domain names
         for match in re.finditer(r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b', text):
             if not match.group().startswith('example.'):
                 add_highlight(match, 'domain')
-
-        # SHA256 hashes (64 hex chars) - check longest first
-        for match in re.finditer(r'\b[a-fA-F0-9]{64}\b', text):
-            add_highlight(match, 'sha256')
-
-        # SHA1 hashes (40 hex chars)
-        for match in re.finditer(r'\b[a-fA-F0-9]{40}\b', text):
-            add_highlight(match, 'sha1')
-
-        # MD5 hashes (32 hex chars)
-        for match in re.finditer(r'\b[a-fA-F0-9]{32}\b', text):
-            add_highlight(match, 'md5')
 
         # Email addresses
         for match in re.finditer(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text):
