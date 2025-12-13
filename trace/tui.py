@@ -1452,7 +1452,20 @@ class TUI:
             self.handle_open_iocs()
         elif key == ord('v'):
             if self.current_view == "case_detail":
-                self.view_case_notes()
+                # Open notes modal with selected case note highlighted (if applicable)
+                if self.active_case:
+                    case_notes = self.active_case.notes
+                    filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
+
+                    # Check if a case note is selected (not an evidence item)
+                    if case_notes and self.selected_index >= len(filtered):
+                        note_idx = self.selected_index - len(filtered)
+                        if note_idx < len(case_notes):
+                            self.view_case_notes(highlight_note_index=note_idx)
+                        else:
+                            self.view_case_notes()
+                    else:
+                        self.view_case_notes()
             elif self.current_view == "evidence_detail":
                 # Open notes modal with selected note highlighted
                 if self.active_evidence:
