@@ -52,18 +52,30 @@ The application uses a three-level hierarchy:
 
 Each level has unique IDs (UUIDs) for reliable lookups across the hierarchy.
 
-### Core Modules
+### Modular Structure (Optimized for AI Coding Agents)
 
-**`trace/models.py`**: Data models using dataclasses
-- `Note`: Content + timestamp + SHA256 hash + optional GPG signature + auto-extracted tags/IOCs
-- `Evidence`: Container for notes about a specific piece of evidence, includes metadata dict for source hashes
-- `Case`: Top-level container with case number, investigator, evidence list, and notes
+The codebase is organized into focused, single-responsibility modules to make it easier for AI agents and developers to navigate, understand, and modify specific functionality:
+
+**`trace/models/`**: Data models package
+- `__init__.py`: Main model classes (Note, Evidence, Case) with dataclass definitions
+- `extractors/tag_extractor.py`: Tag extraction logic (hashtag parsing)
+- `extractors/ioc_extractor.py`: IOC extraction logic (IPs, domains, URLs, hashes, emails)
 - All models implement `to_dict()`/`from_dict()` for JSON serialization
+- Models use extractors for automatic tag and IOC detection
 
-**`trace/storage.py`**: Persistence layer
-- `Storage`: Manages `~/.trace/data.json` with atomic writes (temp file + rename)
-- `StateManager`: Manages `~/.trace/state` (active case/evidence) and `~/.trace/settings.json` (PGP enabled/disabled)
-- Data is loaded into memory on init, modified, then saved atomically
+**`trace/storage_impl/`**: Storage implementation package
+- `storage.py`: Main Storage class managing `~/.trace/data.json` with atomic writes
+- `state_manager.py`: StateManager for active context and settings persistence
+- `lock_manager.py`: Cross-platform file locking to prevent concurrent access
+- `demo_data.py`: Demo case creation for first-time users
+- Backward compatible via `trace/storage.py` wrapper
+
+**`trace/tui/`**: Text User Interface package
+- `tui.py`: Main TUI class with view hierarchy and event loop (3307 lines - target for future refactoring)
+- `rendering/colors.py`: Color pair initialization and constants
+- `rendering/text_renderer.py`: Text rendering with IOC/tag highlighting
+- `handlers/export_handler.py`: Export functionality (IOCs, markdown reports)
+- Future refactoring will extract views, dialogs, and input handlers
 
 **`trace/crypto.py`**: Integrity features
 - `sign_content()`: GPG clearsign via subprocess (falls back gracefully if GPG unavailable)
@@ -73,13 +85,6 @@ Each level has unique IDs (UUIDs) for reliable lookups across the hierarchy.
 - `quick_add_note()`: Adds note to active context from command line
 - `export_markdown()`: Generates full case report with hashes and signatures
 - `main()`: Argument parsing, routes to TUI or CLI functions
-
-**`trace/tui.py`**: Curses-based Text User Interface
-- View hierarchy: case_list → case_detail → evidence_detail
-- Additional views: tags_list, tag_notes_list, ioc_list, ioc_notes_list, note_detail
-- Multi-line note editor with Ctrl+G to submit, Esc to cancel
-- Filter mode (press `/`), active context management (press `a`)
-- All note additions automatically extract tags (#hashtag) and IOCs (IPs, domains, URLs, hashes, emails)
 
 ### Key Features Implementation
 
@@ -129,3 +134,33 @@ temp_file.replace(self.data_file)
 ## Testing Notes
 
 Tests use temporary directories created with `tempfile.mkdtemp()` and cleaned up in `tearDown()` to avoid polluting `~/.trace/`.
+
+## AI Agent Optimization
+
+The codebase has been restructured to be optimal for AI coding agents:
+
+### Module Organization Benefits
+- **Focused Files**: Each module has a single, clear responsibility (50-250 lines typically)
+- **Easy Navigation**: Functionality is easy to locate by purpose (e.g., IOC extraction, export handlers)
+- **Independent Modification**: Changes to one module rarely affect others
+- **Clear Interfaces**: Modules communicate through well-defined imports
+- **Reduced Context**: AI agents can focus on relevant files without loading massive monoliths
+
+### File Size Guidelines
+- **Small modules** (< 150 lines): Ideal for focused tasks
+- **Medium modules** (150-300 lines): Acceptable for cohesive functionality
+- **Large modules** (> 500 lines): Consider refactoring into smaller components
+- **Very large modules** (> 1000 lines): Priority target for extraction and modularization
+
+### Current Status
+- ✅ Models: Organized into package with extractors separated
+- ✅ Storage: Split into focused modules (storage, state, locking, demo data)
+- ✅ TUI Utilities: Rendering and export handlers extracted
+- ⏳ TUI Main: Still monolithic (3307 lines) - future refactoring needed
+
+### Future Refactoring Targets
+The `trace/tui.py` file (3307 lines) should be further split into:
+- `tui/views/` - Individual view classes (case list, evidence detail, etc.)
+- `tui/dialogs/` - Dialog functions (input, confirm, settings, etc.)
+- `tui/handlers/` - Input and navigation handlers
+- `tui/app.py` - Main TUI orchestration class
