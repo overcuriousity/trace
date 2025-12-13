@@ -2404,25 +2404,15 @@ class TUI:
                     self.show_message(f"Case {case_to_del.case_number} deleted.")
 
         elif self.current_view == "case_detail" and self.active_case:
-            # Determine if we're deleting a note or evidence based on selected index
+            # Determine if we're deleting evidence or note based on selected index
             case_notes = self.active_case.notes
             filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
 
-            # Check if selecting a note (indices 0 to len(notes)-1)
-            if self.selected_index < len(case_notes):
-                # Delete case note
-                note_to_del = case_notes[self.selected_index]
-                preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
-                if self.dialog_confirm(f"Delete note: '{preview}'?"):
-                    self.active_case.notes.remove(note_to_del)
-                    self.storage.save_data()
-                    self.selected_index = 0
-                    self.scroll_offset = 0
-                    self.show_message("Note deleted.")
-            elif filtered and self.selected_index - len(case_notes) < len(filtered):
-                # Delete evidence (adjust index by subtracting case notes count)
-                evidence_idx = self.selected_index - len(case_notes)
-                ev_to_del = filtered[evidence_idx]
+            # Evidence items come first (indices 0 to len(filtered)-1)
+            # Case notes come second (indices len(filtered) to len(filtered)+len(case_notes)-1)
+            if self.selected_index < len(filtered):
+                # Delete evidence
+                ev_to_del = filtered[self.selected_index]
                 if self.dialog_confirm(f"Delete Evidence {ev_to_del.name}?"):
                     self.storage.delete_evidence(self.active_case.case_id, ev_to_del.evidence_id)
                     # Check active state
@@ -2437,6 +2427,17 @@ class TUI:
                     self.selected_index = 0
                     self.scroll_offset = 0
                     self.show_message(f"Evidence '{ev_to_del.name}' deleted.")
+            elif case_notes and self.selected_index - len(filtered) < len(case_notes):
+                # Delete case note (adjust index by subtracting evidence count)
+                note_idx = self.selected_index - len(filtered)
+                note_to_del = case_notes[note_idx]
+                preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
+                if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                    self.active_case.notes.remove(note_to_del)
+                    self.storage.save_data()
+                    self.selected_index = 0
+                    self.scroll_offset = 0
+                    self.show_message("Note deleted.")
 
         elif self.current_view == "evidence_detail" and self.active_evidence:
             # Delete individual notes from evidence
