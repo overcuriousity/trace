@@ -1313,16 +1313,32 @@ class TUI:
                 filtered = self._get_filtered_list(self.active_case.evidence, "name", "description")
                 max_idx = len(filtered) + len(case_notes) - 1
             elif self.current_view == "evidence_detail" and self.active_evidence:
-                # Navigate through notes in evidence detail view
-                max_idx = len(self.active_evidence.notes) - 1
+                # Navigate through notes in evidence detail view (respect filter)
+                notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
+                max_idx = len(notes) - 1
             elif self.current_view == "tags_list":
-                max_idx = len(self.current_tags) - 1
+                # Respect filter for tags
+                tags_to_show = self.current_tags
+                if self.filter_query:
+                    q = self.filter_query.lower()
+                    tags_to_show = [(tag, count) for tag, count in self.current_tags if q in tag.lower()]
+                max_idx = len(tags_to_show) - 1
             elif self.current_view == "tag_notes_list":
-                max_idx = len(self.tag_notes) - 1
+                # Respect filter for notes
+                notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
+                max_idx = len(notes_to_show) - 1
             elif self.current_view == "ioc_list":
-                max_idx = len(self.current_iocs) - 1
+                # Respect filter for IOCs
+                iocs_to_show = self.current_iocs
+                if self.filter_query:
+                    q = self.filter_query.lower()
+                    iocs_to_show = [(ioc, count, ioc_type) for ioc, count, ioc_type in self.current_iocs
+                                   if q in ioc.lower() or q in ioc_type.lower()]
+                max_idx = len(iocs_to_show) - 1
             elif self.current_view == "ioc_notes_list":
-                max_idx = len(self.ioc_notes) - 1
+                # Respect filter for notes
+                notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
+                max_idx = len(notes_to_show) - 1
             elif self.current_view == "help":
                 # Scrolling help content - just increment scroll_offset directly
                 # Help view uses scroll_offset for scrolling, not selected_index
@@ -1347,8 +1363,8 @@ class TUI:
                     self.scroll_offset = 0
                     self.filter_query = ""
             elif self.current_view == "evidence_detail" and self.active_evidence:
-                # Check if a note is selected
-                notes = self.active_evidence.notes
+                # Check if a note is selected (respect filter if active)
+                notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
                 list_h = self.content_h - 5
                 display_notes = notes[-list_h:] if len(notes) > list_h else notes
 
@@ -1381,9 +1397,13 @@ class TUI:
                         self.current_view = "note_detail"
                         self.filter_query = ""
             elif self.current_view == "tags_list":
-                # Enter tag -> show notes with that tag
-                if self.current_tags and self.selected_index < len(self.current_tags):
-                    tag, _ = self.current_tags[self.selected_index]
+                # Enter tag -> show notes with that tag (respect filter if active)
+                tags_to_show = self.current_tags
+                if self.filter_query:
+                    q = self.filter_query.lower()
+                    tags_to_show = [(tag, count) for tag, count in self.current_tags if q in tag.lower()]
+                if tags_to_show and self.selected_index < len(tags_to_show):
+                    tag, _ = tags_to_show[self.selected_index]
                     self.current_tag = tag
                     # Get all notes (case + evidence if in case view, or just evidence if in evidence view)
                     all_notes = self._get_context_notes()
@@ -1394,17 +1414,23 @@ class TUI:
                     self.selected_index = 0
                     self.scroll_offset = 0
             elif self.current_view == "tag_notes_list":
-                # Enter note -> show expanded view
-                if self.tag_notes and self.selected_index < len(self.tag_notes):
-                    self.current_note = self.tag_notes[self.selected_index]
+                # Enter note -> show expanded view (respect filter if active)
+                notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
+                if notes_to_show and self.selected_index < len(notes_to_show):
+                    self.current_note = notes_to_show[self.selected_index]
                     self.previous_view = "tag_notes_list"
                     self.current_view = "note_detail"
                     self.selected_index = 0
                     self.scroll_offset = 0
             elif self.current_view == "ioc_list":
-                # Enter IOC -> show notes with that IOC
-                if self.current_iocs and self.selected_index < len(self.current_iocs):
-                    ioc, _, _ = self.current_iocs[self.selected_index]
+                # Enter IOC -> show notes with that IOC (respect filter if active)
+                iocs_to_show = self.current_iocs
+                if self.filter_query:
+                    q = self.filter_query.lower()
+                    iocs_to_show = [(ioc, count, ioc_type) for ioc, count, ioc_type in self.current_iocs
+                                   if q in ioc.lower() or q in ioc_type.lower()]
+                if iocs_to_show and self.selected_index < len(iocs_to_show):
+                    ioc, _, _ = iocs_to_show[self.selected_index]
                     self.current_ioc = ioc
                     # Get all notes from current context
                     all_notes = self._get_context_notes()
@@ -1415,9 +1441,10 @@ class TUI:
                     self.selected_index = 0
                     self.scroll_offset = 0
             elif self.current_view == "ioc_notes_list":
-                # Enter note -> show expanded view
-                if self.ioc_notes and self.selected_index < len(self.ioc_notes):
-                    self.current_note = self.ioc_notes[self.selected_index]
+                # Enter note -> show expanded view (respect filter if active)
+                notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
+                if notes_to_show and self.selected_index < len(notes_to_show):
+                    self.current_note = notes_to_show[self.selected_index]
                     self.previous_view = "ioc_notes_list"
                     self.current_view = "note_detail"
                     self.selected_index = 0
@@ -1524,17 +1551,22 @@ class TUI:
                     else:
                         self.view_case_notes()
             elif self.current_view == "evidence_detail":
-                # Open notes modal with selected note highlighted
+                # Open notes modal with selected note highlighted (respect filter if active)
                 if self.active_evidence:
-                    notes = self.active_evidence.notes
+                    notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
                     list_h = self.content_h - 5
                     display_notes = notes[-list_h:] if len(notes) > list_h else notes
 
                     if display_notes and self.selected_index < len(display_notes):
-                        # Calculate the actual note index in the full list
-                        note_offset = len(notes) - len(display_notes)
-                        actual_note_index = note_offset + self.selected_index
-                        self.view_evidence_notes(highlight_note_index=actual_note_index)
+                        # Get the selected note from filtered/displayed list
+                        selected_note = display_notes[self.selected_index]
+                        # Find its index in the full unfiltered list for highlighting
+                        try:
+                            actual_note_index = self.active_evidence.notes.index(selected_note)
+                            self.view_evidence_notes(highlight_note_index=actual_note_index)
+                        except ValueError:
+                            # Note not found in full list (shouldn't happen)
+                            self.view_evidence_notes()
                     else:
                         self.view_evidence_notes()
 
@@ -2440,13 +2472,13 @@ class TUI:
                     self.show_message("Note deleted.")
 
         elif self.current_view == "evidence_detail" and self.active_evidence:
-            # Delete individual notes from evidence
+            # Delete individual notes from evidence (respect filter if active)
             if not self.active_evidence.notes:
                 self.show_message("No notes to delete.")
                 return
 
-            # Calculate which note to delete based on display (showing last N notes)
-            notes = self.active_evidence.notes
+            # Calculate which note to delete based on display (showing last N filtered notes)
+            notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
             list_h = self.content_h - 5  # Adjust for header
             display_notes = notes[-list_h:] if len(notes) > list_h else notes
 
@@ -2499,11 +2531,12 @@ class TUI:
                     self.show_message("Error: Note not found.")
 
         elif self.current_view == "tag_notes_list":
-            # Delete selected note from tag notes list
-            if not self.tag_notes or self.selected_index >= len(self.tag_notes):
+            # Delete selected note from tag notes list (respect filter if active)
+            notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
+            if not notes_to_show or self.selected_index >= len(notes_to_show):
                 return
 
-            note_to_del = self.tag_notes[self.selected_index]
+            note_to_del = notes_to_show[self.selected_index]
             preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
             if self.dialog_confirm(f"Delete note: '{preview}'?"):
                 # Find and delete the note from its parent
@@ -2532,11 +2565,12 @@ class TUI:
                     self.show_message("Error: Note not found.")
 
         elif self.current_view == "ioc_notes_list":
-            # Delete selected note from IOC notes list
-            if not self.ioc_notes or self.selected_index >= len(self.ioc_notes):
+            # Delete selected note from IOC notes list (respect filter if active)
+            notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
+            if not notes_to_show or self.selected_index >= len(notes_to_show):
                 return
 
-            note_to_del = self.ioc_notes[self.selected_index]
+            note_to_del = notes_to_show[self.selected_index]
             preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
             if self.dialog_confirm(f"Delete note: '{preview}'?"):
                 # Find and delete the note from its parent
