@@ -166,7 +166,7 @@ Attachment: invoice.pdf.exe (double extension trick) #email-forensics #phishing-
         if not self.data_file.exists():
             return []
         try:
-            with open(self.data_file, 'r') as f:
+            with open(self.data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return [Case.from_dict(c) for c in data]
         except (json.JSONDecodeError, IOError):
@@ -176,8 +176,8 @@ Attachment: invoice.pdf.exe (double extension trick) #email-forensics #phishing-
         data = [c.to_dict() for c in self.cases]
         # Write to temp file then rename for atomic-ish write
         temp_file = self.data_file.with_suffix(".tmp")
-        with open(temp_file, 'w') as f:
-            json.dump(data, f, indent=2)
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
         temp_file.replace(self.data_file)
 
     def add_case(self, case: Case):
@@ -225,15 +225,15 @@ class StateManager:
         state["evidence_id"] = evidence_id
         # Atomic write: write to temp file then rename
         temp_file = self.state_file.with_suffix(".tmp")
-        with open(temp_file, 'w') as f:
-            json.dump(state, f)
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False)
         temp_file.replace(self.state_file)
 
     def get_active(self) -> dict:
         if not self.state_file.exists():
             return {"case_id": None, "evidence_id": None}
         try:
-            with open(self.state_file, 'r') as f:
+            with open(self.state_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return {"case_id": None, "evidence_id": None}
@@ -242,7 +242,7 @@ class StateManager:
         if not self.settings_file.exists():
             return {"pgp_enabled": True}
         try:
-            with open(self.settings_file, 'r') as f:
+            with open(self.settings_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return {"pgp_enabled": True}
@@ -252,6 +252,6 @@ class StateManager:
         settings[key] = value
         # Atomic write: write to temp file then rename
         temp_file = self.settings_file.with_suffix(".tmp")
-        with open(temp_file, 'w') as f:
-            json.dump(settings, f)
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False)
         temp_file.replace(self.settings_file)

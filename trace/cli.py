@@ -69,7 +69,7 @@ def export_markdown(output_file: str = "export.md"):
     try:
         storage = Storage()
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding='utf-8') as f:
             f.write("# Forensic Notes Export\n\n")
             f.write(f"Generated on: {time.ctime()}\n\n")
 

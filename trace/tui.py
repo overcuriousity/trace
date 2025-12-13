@@ -1898,7 +1898,7 @@ class TUI:
                 line = lines[cursor_line]
                 lines[cursor_line] = line[:cursor_col] + chr(ch) + line[cursor_col:]
                 cursor_col += 1
-                
+
                 # Auto-wrap to next line if cursor exceeds visible width
                 if cursor_col >= input_width:
                     # Always ensure there's a next line to move to
@@ -1910,6 +1910,42 @@ class TUI:
                     # Adjust scroll if needed
                     if cursor_line >= scroll_offset + input_height:
                         scroll_offset = cursor_line - input_height + 1
+
+            elif ch > 127:
+                # UTF-8 multi-byte character (umlauts, etc.)
+                # curses returns the first byte, we need to read the rest
+                try:
+                    # Try to decode as UTF-8
+                    # For multibyte UTF-8, we need to collect all bytes
+                    bytes_collected = [ch]
+
+                    # Determine how many bytes we need based on the first byte
+                    if ch >= 0xF0:  # 4-byte character
+                        num_bytes = 4
+                    elif ch >= 0xE0:  # 3-byte character
+                        num_bytes = 3
+                    elif ch >= 0xC0:  # 2-byte character
+                        num_bytes = 2
+                    else:
+                        num_bytes = 1
+
+                    # Read remaining bytes
+                    for _ in range(num_bytes - 1):
+                        next_ch = win.getch()
+                        bytes_collected.append(next_ch)
+
+                    # Convert to character
+                    char_bytes = bytes([b & 0xFF for b in bytes_collected])
+                    char = char_bytes.decode('utf-8')
+
+                    # Insert character at cursor
+                    line = lines[cursor_line]
+                    lines[cursor_line] = line[:cursor_col] + char + line[cursor_col:]
+                    cursor_col += 1
+
+                except (UnicodeDecodeError, ValueError):
+                    # If decode fails, ignore the character
+                    pass
 
     def dialog_confirm(self, message):
         curses.curs_set(0)
@@ -2643,7 +2679,7 @@ class TUI:
 
         # Write to file
         try:
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(lines))
             self.show_message(f"IOCs exported to: {filepath}")
         except Exception as e:
