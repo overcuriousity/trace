@@ -781,7 +781,7 @@ class TUI:
                 is_selected = (item_idx == self.selected_index)
                 self._display_line_with_highlights(y, 4, display_str, is_selected)
 
-        self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View  [e] Export  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
 
     def draw_evidence_detail(self):
         if not self.active_evidence: return
@@ -812,14 +812,17 @@ class TUI:
             current_y += 1
 
         current_y += 1  # Blank line before notes
-        self.stdscr.addstr(current_y, 2, f"Notes ({len(self.active_evidence.notes)}):", curses.A_UNDERLINE)
+
+        # Apply filter if active
+        notes = self._get_filtered_list(self.active_evidence.notes, "content") if self.filter_query else self.active_evidence.notes
+
+        self.stdscr.addstr(current_y, 2, f"Notes ({len(notes)}):", curses.A_UNDERLINE)
         current_y += 1
 
         # Just show last N notes that fit
         list_h = self.content_h - (current_y - 2)  # Adjust for dynamic header
         start_y = current_y
 
-        notes = self.active_evidence.notes
         display_notes = notes[-list_h:] if len(notes) > list_h else notes
 
         # Update scroll for note selection
@@ -841,7 +844,10 @@ class TUI:
             is_selected = (idx == self.selected_index)
             self._display_line_with_highlights(start_y + i, 4, display_str, is_selected)
 
-        self.stdscr.addstr(self.height - 3, 2, "[n] Add Note  [t] Tags  [i] IOCs  [v] View Notes  [a] Active  [d] Delete Note  [?] Help", curses.color_pair(3))
+        footer = "[n] Add Note  [t] Tags  [i] IOCs  [v] View  [e] Export  [a] Active  [d] Delete  [/] Filter  [?] Help"
+        if self.filter_query:
+            footer += f"  Filter: {self.filter_query}"
+        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
 
     def draw_tags_list(self):
         """Draw the tags list view showing all tags sorted by occurrence count"""
@@ -851,19 +857,29 @@ class TUI:
         self.stdscr.addstr(2, 2, f"Tags for {context}: {context_name}", curses.A_BOLD)
         self.stdscr.addstr(3, 2, "─" * (self.width - 4))
 
-        if not self.current_tags:
-            self.stdscr.addstr(5, 4, "No tags found.", curses.color_pair(3))
-            self.stdscr.addstr(self.height - 3, 2, "[b] Back", curses.color_pair(3))
+        # Apply filter if active (filter by tag name)
+        tags_to_show = self.current_tags
+        if self.filter_query:
+            q = self.filter_query.lower()
+            tags_to_show = [(tag, count) for tag, count in self.current_tags if q in tag.lower()]
+
+        if not tags_to_show:
+            msg = "No tags match filter." if self.filter_query else "No tags found."
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
+            footer = "[b] Back  [/] Filter"
+            if self.filter_query:
+                footer += f"  Filter: {self.filter_query}"
+            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
             return
 
-        list_h = self._update_scroll(len(self.current_tags))
+        list_h = self._update_scroll(len(tags_to_show))
 
         for i in range(list_h):
             idx = self.scroll_offset + i
-            if idx >= len(self.current_tags):
+            if idx >= len(tags_to_show):
                 break
 
-            tag, count = self.current_tags[idx]
+            tag, count = tags_to_show[idx]
             y = 5 + i
 
             display_str = f"#{tag}".ljust(30) + f"({count} notes)"
@@ -876,26 +892,36 @@ class TUI:
             else:
                 self.stdscr.addstr(y, 4, display_str)
 
-        self.stdscr.addstr(self.height - 3, 2, "[Enter] View Notes  [b] Back", curses.color_pair(3))
+        footer = "[Enter] View Notes  [b] Back  [/] Filter"
+        if self.filter_query:
+            footer += f"  Filter: {self.filter_query}"
+        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
 
     def draw_tag_notes_list(self):
         """Draw compact list of notes containing the selected tag"""
-        self.stdscr.addstr(2, 2, f"Notes tagged with #{self.current_tag} ({len(self.tag_notes)})", curses.A_BOLD)
+        # Apply filter if active
+        notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
+
+        self.stdscr.addstr(2, 2, f"Notes tagged with #{self.current_tag} ({len(notes_to_show)})", curses.A_BOLD)
         self.stdscr.addstr(3, 2, "─" * (self.width - 4))
 
-        if not self.tag_notes:
-            self.stdscr.addstr(5, 4, "No notes found.", curses.color_pair(3))
-            self.stdscr.addstr(self.height - 3, 2, "[b] Back", curses.color_pair(3))
+        if not notes_to_show:
+            msg = "No notes match filter." if self.filter_query else "No notes found."
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
+            footer = "[b] Back  [/] Filter"
+            if self.filter_query:
+                footer += f"  Filter: {self.filter_query}"
+            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
             return
 
-        list_h = self._update_scroll(len(self.tag_notes))
+        list_h = self._update_scroll(len(notes_to_show))
 
         for i in range(list_h):
             idx = self.scroll_offset + i
-            if idx >= len(self.tag_notes):
+            if idx >= len(notes_to_show):
                 break
 
-            note = self.tag_notes[idx]
+            note = notes_to_show[idx]
             y = 5 + i
 
             timestamp_str = time.ctime(note.timestamp)
@@ -914,7 +940,10 @@ class TUI:
             else:
                 self.stdscr.addstr(y, 4, display_str)
 
-        self.stdscr.addstr(self.height - 3, 2, "[Enter] Expand  [b] Back", curses.color_pair(3))
+        footer = "[Enter] Expand  [d] Delete  [b] Back  [/] Filter"
+        if self.filter_query:
+            footer += f"  Filter: {self.filter_query}"
+        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
 
     def draw_ioc_list(self):
         """Draw the IOC list view showing all IOCs sorted by occurrence count"""
@@ -924,19 +953,30 @@ class TUI:
         self.stdscr.addstr(2, 2, f"IOCs for {context}: {context_name}", curses.A_BOLD)
         self.stdscr.addstr(3, 2, "─" * (self.width - 4))
 
-        if not self.current_iocs:
-            self.stdscr.addstr(5, 4, "No IOCs found.", curses.color_pair(3))
-            self.stdscr.addstr(self.height - 3, 2, "[b] Back  [e] Export", curses.color_pair(3))
+        # Apply filter if active (filter by IOC value or type)
+        iocs_to_show = self.current_iocs
+        if self.filter_query:
+            q = self.filter_query.lower()
+            iocs_to_show = [(ioc, count, ioc_type) for ioc, count, ioc_type in self.current_iocs
+                           if q in ioc.lower() or q in ioc_type.lower()]
+
+        if not iocs_to_show:
+            msg = "No IOCs match filter." if self.filter_query else "No IOCs found."
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
+            footer = "[b] Back  [e] Export  [/] Filter"
+            if self.filter_query:
+                footer += f"  Filter: {self.filter_query}"
+            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
             return
 
-        list_h = self._update_scroll(len(self.current_iocs))
+        list_h = self._update_scroll(len(iocs_to_show))
 
         for i in range(list_h):
             idx = self.scroll_offset + i
-            if idx >= len(self.current_iocs):
+            if idx >= len(iocs_to_show):
                 break
 
-            ioc, count, ioc_type = self.current_iocs[idx]
+            ioc, count, ioc_type = iocs_to_show[idx]
             y = 5 + i
 
             # Show IOC with type indicator and count in red
@@ -953,26 +993,36 @@ class TUI:
                 self.stdscr.addstr(y, 4, display_str)
                 self.stdscr.attroff(curses.color_pair(4))
 
-        self.stdscr.addstr(self.height - 3, 2, "[Enter] View Notes  [e] Export  [b] Back", curses.color_pair(3))
+        footer = "[Enter] View Notes  [e] Export  [b] Back  [/] Filter"
+        if self.filter_query:
+            footer += f"  Filter: {self.filter_query}"
+        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
 
     def draw_ioc_notes_list(self):
         """Draw compact list of notes containing the selected IOC"""
-        self.stdscr.addstr(2, 2, f"Notes with IOC: {self.current_ioc} ({len(self.ioc_notes)})", curses.A_BOLD)
+        # Apply filter if active
+        notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
+
+        self.stdscr.addstr(2, 2, f"Notes with IOC: {self.current_ioc} ({len(notes_to_show)})", curses.A_BOLD)
         self.stdscr.addstr(3, 2, "─" * (self.width - 4))
 
-        if not self.ioc_notes:
-            self.stdscr.addstr(5, 4, "No notes found.", curses.color_pair(3))
-            self.stdscr.addstr(self.height - 3, 2, "[b] Back", curses.color_pair(3))
+        if not notes_to_show:
+            msg = "No notes match filter." if self.filter_query else "No notes found."
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
+            footer = "[b] Back  [e] Export  [/] Filter"
+            if self.filter_query:
+                footer += f"  Filter: {self.filter_query}"
+            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
             return
 
-        list_h = self._update_scroll(len(self.ioc_notes))
+        list_h = self._update_scroll(len(notes_to_show))
 
         for i in range(list_h):
             idx = self.scroll_offset + i
-            if idx >= len(self.ioc_notes):
+            if idx >= len(notes_to_show):
                 break
 
-            note = self.ioc_notes[idx]
+            note = notes_to_show[idx]
             y = 5 + i
 
             timestamp_str = time.ctime(note.timestamp)
@@ -988,7 +1038,10 @@ class TUI:
             else:
                 self.stdscr.addstr(y, 4, display_str)
 
-        self.stdscr.addstr(self.height - 3, 2, "[Enter] Expand  [b] Back", curses.color_pair(3))
+        footer = "[Enter] Expand  [d] Delete  [e] Export  [b] Back  [/] Filter"
+        if self.filter_query:
+            footer += f"  Filter: {self.filter_query}"
+        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
 
     def draw_note_detail(self):
         """Draw expanded view of a single note with all details"""
@@ -1050,7 +1103,7 @@ class TUI:
             self.stdscr.addstr(current_y, 2, "Signature: [GPG signed]", curses.color_pair(2))
             current_y += 1
 
-        self.stdscr.addstr(self.height - 3, 2, "[b] Back", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back", curses.color_pair(3))
 
     def draw_help(self):
         """Draw the help screen with keyboard shortcuts and features"""
@@ -1234,8 +1287,8 @@ class TUI:
 
         # Filter toggle
         if key == ord('/'):
-            # Filter works on list views: case_list and case_detail (evidence list)
-            if self.current_view in ["case_list", "case_detail"]:
+            # Filter works on all list views (context-sensitive)
+            if self.current_view in ["case_list", "case_detail", "evidence_detail", "tags_list", "tag_notes_list", "ioc_list", "ioc_notes_list"]:
                 self.filter_mode = True
                 return True
 
@@ -1426,10 +1479,14 @@ class TUI:
                 self.scroll_offset = 0
                 self.filter_query = ""
 
-        # Export IOCs
+        # Export
         elif key == ord('e'):
             if self.current_view in ["ioc_list", "ioc_notes_list"]:
                 self.export_iocs()
+            elif self.current_view == "case_detail":
+                self.export_case_markdown()
+            elif self.current_view == "evidence_detail":
+                self.export_evidence_markdown()
 
         # Set Active
         elif key == ord('a'):
@@ -2406,6 +2463,106 @@ class TUI:
                         self.scroll_offset = 0
                         self.show_message("Note deleted.")
 
+        elif self.current_view == "note_detail":
+            # Delete the currently viewed note
+            if not self.current_note:
+                return
+
+            preview = self.current_note.content[:50] + "..." if len(self.current_note.content) > 50 else self.current_note.content
+            if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                # Find and delete the note from its parent (case or evidence)
+                deleted = False
+                # Check all cases and their evidence for this note
+                for case in self.cases:
+                    if self.current_note in case.notes:
+                        case.notes.remove(self.current_note)
+                        deleted = True
+                        break
+                    for ev in case.evidence:
+                        if self.current_note in ev.notes:
+                            ev.notes.remove(self.current_note)
+                            deleted = True
+                            break
+                    if deleted:
+                        break
+
+                if deleted:
+                    self.storage.save_data()
+                    self.show_message("Note deleted.")
+                    # Return to previous view
+                    self.current_view = getattr(self, 'previous_view', 'case_detail')
+                    self.current_note = None
+                    self.selected_index = 0
+                    self.scroll_offset = 0
+                else:
+                    self.show_message("Error: Note not found.")
+
+        elif self.current_view == "tag_notes_list":
+            # Delete selected note from tag notes list
+            if not self.tag_notes or self.selected_index >= len(self.tag_notes):
+                return
+
+            note_to_del = self.tag_notes[self.selected_index]
+            preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
+            if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                # Find and delete the note from its parent
+                deleted = False
+                for case in self.cases:
+                    if note_to_del in case.notes:
+                        case.notes.remove(note_to_del)
+                        deleted = True
+                        break
+                    for ev in case.evidence:
+                        if note_to_del in ev.notes:
+                            ev.notes.remove(note_to_del)
+                            deleted = True
+                            break
+                    if deleted:
+                        break
+
+                if deleted:
+                    self.storage.save_data()
+                    # Remove from tag_notes list as well
+                    self.tag_notes.remove(note_to_del)
+                    self.selected_index = min(self.selected_index, len(self.tag_notes) - 1) if self.tag_notes else 0
+                    self.scroll_offset = 0
+                    self.show_message("Note deleted.")
+                else:
+                    self.show_message("Error: Note not found.")
+
+        elif self.current_view == "ioc_notes_list":
+            # Delete selected note from IOC notes list
+            if not self.ioc_notes or self.selected_index >= len(self.ioc_notes):
+                return
+
+            note_to_del = self.ioc_notes[self.selected_index]
+            preview = note_to_del.content[:50] + "..." if len(note_to_del.content) > 50 else note_to_del.content
+            if self.dialog_confirm(f"Delete note: '{preview}'?"):
+                # Find and delete the note from its parent
+                deleted = False
+                for case in self.cases:
+                    if note_to_del in case.notes:
+                        case.notes.remove(note_to_del)
+                        deleted = True
+                        break
+                    for ev in case.evidence:
+                        if note_to_del in ev.notes:
+                            ev.notes.remove(note_to_del)
+                            deleted = True
+                            break
+                    if deleted:
+                        break
+
+                if deleted:
+                    self.storage.save_data()
+                    # Remove from ioc_notes list as well
+                    self.ioc_notes.remove(note_to_del)
+                    self.selected_index = min(self.selected_index, len(self.ioc_notes) - 1) if self.ioc_notes else 0
+                    self.scroll_offset = 0
+                    self.show_message("Note deleted.")
+                else:
+                    self.show_message("Error: Note not found.")
+
     def view_case_notes(self, highlight_note_index=None):
         if not self.active_case: return
 
@@ -2708,6 +2865,138 @@ class TUI:
             self.show_message(f"IOCs exported to: {filepath}")
         except Exception as e:
             self.show_message(f"Export failed: {str(e)}")
+
+    def export_case_markdown(self):
+        """Export current case (and all its evidence) to markdown"""
+        if not self.active_case:
+            self.show_message("No active case to export.")
+            return
+
+        import os
+        import datetime
+        from pathlib import Path
+
+        # Create exports directory if it doesn't exist
+        export_dir = Path.home() / ".trace" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename
+        case_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in self.active_case.case_number)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"case_{case_name}_{timestamp}.md"
+        filepath = export_dir / filename
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("# Forensic Notes Export\n\n")
+                f.write(f"Generated on: {time.ctime()}\n\n")
+
+                # Write case info
+                f.write(f"## Case: {self.active_case.case_number}\n")
+                if self.active_case.name:
+                    f.write(f"**Name:** {self.active_case.name}\n")
+                if self.active_case.investigator:
+                    f.write(f"**Investigator:** {self.active_case.investigator}\n")
+                f.write(f"**Case ID:** {self.active_case.case_id}\n\n")
+
+                # Case notes
+                f.write("### Case Notes\n")
+                if not self.active_case.notes:
+                    f.write("_No notes._\n")
+                for note in self.active_case.notes:
+                    self._write_note_markdown(f, note)
+                f.write("\n")
+
+                # Evidence
+                f.write("### Evidence\n")
+                if not self.active_case.evidence:
+                    f.write("_No evidence items._\n")
+                for ev in self.active_case.evidence:
+                    f.write(f"#### {ev.name}\n")
+                    if ev.description:
+                        f.write(f"**Description:** {ev.description}\n")
+                    if ev.metadata.get("source_hash"):
+                        f.write(f"**Source Hash:** `{ev.metadata['source_hash']}`\n")
+                    f.write(f"**Evidence ID:** {ev.evidence_id}\n\n")
+
+                    f.write("**Notes:**\n")
+                    if not ev.notes:
+                        f.write("_No notes._\n")
+                    for note in ev.notes:
+                        self._write_note_markdown(f, note)
+                    f.write("\n")
+
+            self.show_message(f"Case exported to: {filepath}")
+        except Exception as e:
+            self.show_message(f"Export failed: {str(e)}")
+
+    def export_evidence_markdown(self):
+        """Export current evidence to markdown"""
+        if not self.active_evidence:
+            self.show_message("No active evidence to export.")
+            return
+
+        import os
+        import datetime
+        from pathlib import Path
+
+        # Create exports directory if it doesn't exist
+        export_dir = Path.home() / ".trace" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename
+        case_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in self.active_case.case_number) if self.active_case else "unknown"
+        ev_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in self.active_evidence.name)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"evidence_{case_name}_{ev_name}_{timestamp}.md"
+        filepath = export_dir / filename
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("# Forensic Evidence Export\n\n")
+                f.write(f"Generated on: {time.ctime()}\n\n")
+
+                # Case context
+                if self.active_case:
+                    f.write(f"**Case:** {self.active_case.case_number}\n")
+                    if self.active_case.name:
+                        f.write(f"**Case Name:** {self.active_case.name}\n")
+                f.write("\n")
+
+                # Evidence info
+                f.write(f"## Evidence: {self.active_evidence.name}\n")
+                if self.active_evidence.description:
+                    f.write(f"**Description:** {self.active_evidence.description}\n")
+                if self.active_evidence.metadata.get("source_hash"):
+                    f.write(f"**Source Hash:** `{self.active_evidence.metadata['source_hash']}`\n")
+                f.write(f"**Evidence ID:** {self.active_evidence.evidence_id}\n\n")
+
+                # Notes
+                f.write("### Notes\n")
+                if not self.active_evidence.notes:
+                    f.write("_No notes._\n")
+                for note in self.active_evidence.notes:
+                    self._write_note_markdown(f, note)
+
+            self.show_message(f"Evidence exported to: {filepath}")
+        except Exception as e:
+            self.show_message(f"Export failed: {str(e)}")
+
+    def _write_note_markdown(self, f, note):
+        """Helper to write a note in markdown format"""
+        f.write(f"- **{time.ctime(note.timestamp)}**\n")
+        f.write(f"  - Content: {note.content}\n")
+        if note.tags:
+            tags_str = " ".join([f"#{tag}" for tag in note.tags])
+            f.write(f"  - Tags: {tags_str}\n")
+        f.write(f"  - Hash: `{note.content_hash}`\n")
+        if note.signature:
+            f.write("  - **Signature Verified:**\n")
+            f.write("    ```\n")
+            for line in note.signature.splitlines():
+                f.write(f"    {line}\n")
+            f.write("    ```\n")
+        f.write("\n")
 
 def run_tui(open_active=False):
     """
