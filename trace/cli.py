@@ -163,7 +163,7 @@ def main():
 
     # Launch TUI (with optional direct navigation to active context)
     try:
-        from .tui import run_tui
+        from .tui_app import run_tui
         run_tui(open_active=args.open)
     except ImportError as e:
         print(f"Error launching TUI: {e}")
