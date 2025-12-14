@@ -20,7 +20,7 @@ trace "IR team gained shell access. Initial persistence checks running."
 trace "Observed outbound connection to 192.168.1.55 on port 80. #suspicious #network"
 ```
 
-**System Integrity Chain:** Each command-line note is immediately stamped, concatenated with its content, and hashed using SHA256 before storage. This ensures a non-repudiable log entry.
+**System Integrity Chain:** Each command-line note is immediately stamped with a Unix epoch timestamp (seconds since 1970-01-01 00:00:00 UTC as float, e.g., `1702345678.123456`), concatenated with its content in the format `"{timestamp}:{content}"`, and hashed using SHA256 before storage. This ensures a non-repudiable log entry with forensically tamper-evident timestamps.
 
 ## CLI Command Reference
 
@@ -195,7 +195,7 @@ After this, you can log with just: `t "Your note here"`
 
 | Feature | Description | Operational Impact |
 | :--- | :--- | :--- |
-| **Integrity Hashing** | SHA256 applied to every log entry (content + timestamp). | **Guaranteed log integrity.** No modification possible post-entry. |
+| **Integrity Hashing** | SHA256 applied to every log entry using format `"{unix_timestamp}:{content}"`. Timestamp is Unix epoch as float (e.g., `1702345678.123456`). | **Guaranteed log integrity.** No modification possible post-entry. Timestamps are forensically tamper-evident with full float precision. |
 | **GPG Signing** | Optional PGP/GPG signature applied to notes. | **Non-repudiation** for formal evidence handling. |
 | **IOC Extraction** | Automatic parsing of IPv4, FQDNs, URLs, hashes, and email addresses. | **Immediate intelligence gathering** from raw text. |
 | **Tag System** | Supports `#hashtags` for classification and filtering. | **Efficient triage** of large log sets. |
@@ -208,20 +208,33 @@ After this, you can log with just: `t "Your note here"`
 ### Layer 1: Note-Level Integrity (Always Active)
 
 **Process:**
-1. **Timestamp Generation** - Precise Unix timestamp captured at note creation
-2. **Content Hashing** - SHA256 hash computed from `timestamp:content`
+1. **Timestamp Generation** - Precise Unix epoch timestamp (float) captured at note creation
+   - Format: Seconds since 1970-01-01 00:00:00 UTC (e.g., `1702345678.123456`)
+   - Full float precision preserved for forensic tamper-evidence
+2. **Content Hashing** - SHA256 hash computed from `"{timestamp}:{content}"`
 3. **Optional Signature** - Hash is signed with investigator's GPG private key
 
 **Mathematical Representation:**
 ```
-hash = SHA256(timestamp + ":" + content)
+timestamp = Unix epoch time as float (e.g., 1702345678.123456)
+hash_input = "{timestamp}:{content}"
+hash = SHA256(hash_input)
 signature = GPG_Sign(hash, private_key)
+```
+
+**Example:**
+```
+Content: "Suspicious process detected"
+Timestamp: 1702345678.123456
+Hash input: "1702345678.123456:Suspicious process detected"
+Hash: SHA256 of above = a3f5b2c8d9e1f4a7b6c3d8e2f5a9b4c7d1e6f3a8b5c2d9e4f7a1b8c6d3e0f5a2
 ```
 
 **Security Properties:**
 - **Temporal Integrity**: Timestamp is cryptographically bound to content (cannot backdate notes)
 - **Tamper Detection**: Any modification to content or timestamp invalidates the hash
 - **Non-Repudiation**: GPG signature proves who created the note (if signing enabled)
+- **Hash Reproducibility**: Exported markdown includes Unix timestamp for independent verification
 - **Efficient Storage**: Signing only the hash (64 hex chars) instead of full content
 
 ### Layer 2: Export-Level Integrity (On Demand)
@@ -327,6 +340,26 @@ Individual note signatures are embedded in the markdown export. To verify a spec
 - The SHA256 hash proves the note content and timestamp haven't changed
 - The GPG signature proves who created that hash
 - Together: Proves this specific content was created by this investigator at this time
+
+**Hash Verification (Manual):**
+
+To independently verify a note's hash from the markdown export:
+
+1. Locate the note in the export file and extract:
+   - Unix Timestamp (e.g., `1702345678.123456`)
+   - Content (e.g., `"Suspicious process detected"`)
+   - Claimed Hash (e.g., `a3f5b2c8...`)
+
+2. Recompute the hash:
+   ```bash
+   # Using Python
+   python3 -c "import hashlib; print(hashlib.sha256(b'1702345678.123456:Suspicious process detected').hexdigest())"
+
+   # Using command-line tools
+   echo -n "1702345678.123456:Suspicious process detected" | sha256sum
+   ```
+
+3. Compare the computed hash with the claimed hash - they must match exactly
 
 ### Cryptographic Trust Model
 
