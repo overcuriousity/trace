@@ -9,18 +9,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 ### Running the Application
+
+#### Launching TUI
 ```bash
-# Run directly from source
+# Launch TUI (default behavior)
 python3 main.py
-
-# Quick CLI note addition (requires active case/evidence set in TUI)
-python3 main.py "Your note content here"
-
-# Export to markdown
-python3 main.py --export --output report.md
 
 # Open TUI directly at active case/evidence
 python3 main.py --open
+```
+
+#### Context Management
+```bash
+# Show current active case and evidence
+python3 main.py --show-context
+
+# List all cases and evidence in hierarchy
+python3 main.py --list
+
+# Switch active case (by case number or UUID)
+python3 main.py --switch-case 2024-001
+
+# Switch active evidence (by name or UUID, within active case)
+python3 main.py --switch-evidence "disk-image-1"
+```
+
+#### Creating Cases and Evidence
+```bash
+# Create new case (automatically sets as active)
+python3 main.py --new-case 2024-001
+
+# Create case with metadata
+python3 main.py --new-case 2024-001 --name "Ransomware Investigation" --investigator "John Doe"
+
+# Create evidence in active case (automatically sets as active)
+python3 main.py --new-evidence "Laptop HDD"
+
+# Create evidence with description
+python3 main.py --new-evidence "Server Logs" --description "Apache access logs from compromised server"
+```
+
+#### Adding Notes
+```bash
+# Quick note to active context
+python3 main.py "Observed suspicious process at 14:32"
+
+# Read note from stdin (for piping command output)
+echo "Network spike detected" | python3 main.py --stdin
+ps aux | grep malware | python3 main.py --stdin
+tail -f logfile.txt | grep error | python3 main.py --stdin
+
+# Add note to specific case without changing active context
+python3 main.py --case 2024-002 "Found malware in temp folder"
+
+# Add note to specific evidence without changing active context
+python3 main.py --evidence "disk-image-2" "Bad sectors detected"
+
+# Add note to specific case and evidence (both overrides)
+python3 main.py --case 2024-001 --evidence "Laptop HDD" "Recovered deleted files"
+```
+
+#### Export
+```bash
+# Export all data to markdown
+python3 main.py --export --output report.md
+
+# Export with default filename (trace_export.md)
+python3 main.py --export
 ```
 
 ### Building Binary
