@@ -12,6 +12,9 @@ from .extractors import TagExtractor, IOCExtractor
 @dataclass
 class Note:
     content: str
+    # Unix timestamp: seconds since 1970-01-01 00:00:00 UTC as float
+    # Example: 1702345678.123456
+    # This exact float value (with full precision) is used in hash calculation
     timestamp: float = field(default_factory=time.time)
     note_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     content_hash: str = ""
@@ -28,7 +31,16 @@ class Note:
         self.iocs = IOCExtractor.extract_iocs(self.content)
 
     def calculate_hash(self):
-        # We hash the content + timestamp to ensure integrity of 'when' it was said
+        """Calculate SHA256 hash of timestamp:content.
+
+        Hash input format: "{timestamp}:{content}"
+        - timestamp: Unix epoch timestamp as float (e.g., "1702345678.123456")
+        - The float is converted to string using Python's default str() conversion
+        - Colon separator between timestamp and content
+        - Ensures integrity of both WHAT was said and WHEN it was said
+
+        Example hash input: "1702345678.123456:Suspicious process detected"
+        """
         data = f"{self.timestamp}:{self.content}".encode('utf-8')
         self.content_hash = hashlib.sha256(data).hexdigest()
 

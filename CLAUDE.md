@@ -145,6 +145,14 @@ The codebase is organized into focused, single-responsibility modules to make it
 
 **Integrity System**: Every note automatically gets:
 1. SHA256 hash of `timestamp:content` (via `Note.calculate_hash()`)
+   - **Timestamp Format**: Unix epoch timestamp as float (seconds since 1970-01-01 00:00:00 UTC)
+   - **Hash Input Format**: `"{timestamp}:{content}"` where timestamp is converted to string using Python's default str() conversion
+   - **Example**: For content "Suspicious process detected" with timestamp 1702345678.123456, the hash input is:
+     ```
+     1702345678.123456:Suspicious process detected
+     ```
+   - This ensures integrity of both WHAT was said (content) and WHEN it was said (timestamp)
+   - The exact float precision is preserved in the hash, making timestamps forensically tamper-evident
 2. Optional GPG clearsign signature (if `pgp_enabled` in settings and GPG available)
 
 **Tag System**: Regex-based hashtag extraction (`#word`)
