@@ -119,7 +119,7 @@ class TUI:
         self.flash_time = time.time()
 
     def verify_note_signature(self):
-        """Show detailed verification dialog for current note with signature export"""
+        """Show signature verification and print raw signature to terminal"""
         if not self.current_note:
             return
 
@@ -137,139 +137,31 @@ class TUI:
             self._show_simple_dialog(title, message)
             return
 
-        # Save signature to file and attempt clipboard copy
-        import subprocess
-        import platform
-        from pathlib import Path
-
-        sig_file = Path.home() / ".trace" / "last_signature.txt"
-        sig_file.parent.mkdir(parents=True, exist_ok=True)
+        # Temporarily exit curses to print signature to terminal
+        curses.endwin()
 
         try:
-            sig_file.write_text(self.current_note.signature)
-            file_saved = True
-        except Exception:
-            file_saved = False
-
-        # Try to copy to clipboard
-        clipboard_success = False
-        clipboard_method = None
-
-        try:
-            system = platform.system()
-            if system == "Linux":
-                # Try xclip first, then xsel
-                try:
-                    subprocess.run(['xclip', '-selection', 'clipboard'],
-                                 input=self.current_note.signature.encode(),
-                                 check=True, timeout=2, capture_output=True)
-                    clipboard_success = True
-                    clipboard_method = "xclip"
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    try:
-                        subprocess.run(['xsel', '--clipboard', '--input'],
-                                     input=self.current_note.signature.encode(),
-                                     check=True, timeout=2, capture_output=True)
-                        clipboard_success = True
-                        clipboard_method = "xsel"
-                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                        pass
-            elif system == "Darwin":  # macOS
-                try:
-                    subprocess.run(['pbcopy'],
-                                 input=self.current_note.signature.encode(),
-                                 check=True, timeout=2, capture_output=True)
-                    clipboard_success = True
-                    clipboard_method = "pbcopy"
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-            elif system == "Windows":
-                try:
-                    subprocess.run(['clip'],
-                                 input=self.current_note.signature.encode(),
-                                 check=True, timeout=2, capture_output=True)
-                    clipboard_success = True
-                    clipboard_method = "clip"
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-        except Exception:
-            pass
-
-        # Build dialog message based on verification and export status
-        if verified:
-            title = "✓ Signature Verified"
-            message = [
-                "The note's signature is valid.",
-                "",
-                f"Signed by: {info}",
-                "",
-                "This note has not been tampered with since signing.",
-            ]
-        else:
-            title = "✗ Signature Verification Failed"
-            message = [
-                "The note's signature could not be verified.",
-                "",
-                f"Reason: {info}",
-                "",
-                "Possible causes:",
-                "- Public key not in keyring",
-                "- Note content was modified after signing",
-                "- Signature is corrupted",
-            ]
-
-        # Add export status information
-        message.append("")
-        message.append("─" * 60)
-        message.append("EXPORT STATUS:")
-        message.append("")
-
-        # Clipboard status with clear feedback
-        if clipboard_success:
-            message.append(f"✓ Clipboard: Copied successfully (using {clipboard_method})")
-            message.append("")
-            message.append("  You can paste directly into Kleopatra or GPG tools.")
-        else:
-            message.append("✗ Clipboard: Failed to copy")
-            message.append("")
-            if system == "Linux":
-                message.append("  Install xclip or xsel for clipboard support:")
-                message.append("  sudo apt install xclip   # Debian/Ubuntu")
-                message.append("  sudo dnf install xclip   # Fedora")
+            # Print verification status
+            print("\n" + "=" * 70)
+            if verified:
+                print(f"✓ SIGNATURE VERIFIED - Signed by: {info}")
             else:
-                message.append("  Clipboard tool not available on this system.")
+                print(f"✗ SIGNATURE VERIFICATION FAILED - Reason: {info}")
+            print("=" * 70)
+            print("\nRAW PGP SIGNATURE (select and copy from terminal):")
+            print("-" * 70)
 
-        message.append("")
+            # Print the actual signature
+            print(self.current_note.signature)
 
-        # File save status
-        if file_saved:
-            message.append(f"✓ File: Saved to {sig_file}")
-        else:
-            message.append("✗ File: Failed to save (check permissions)")
+            print("-" * 70)
+            print("\nPress Enter to return to trace...")
+            input()
 
-        # Add GPG verification commands if file was saved
-        if file_saved:
-            message.append("")
-            message.append("─" * 60)
-            message.append("VERIFY WITH GPG:")
-            message.append("")
-
-            # Linux/macOS commands
-            message.append("Linux/macOS:")
-            message.append(f"  gpg --verify <(cat {sig_file})")
-            message.append("")
-            message.append("  # Or view the signature:")
-            message.append(f"  cat {sig_file}")
-            message.append("")
-
-            # Windows PowerShell commands
-            message.append("Windows PowerShell:")
-            message.append(f"  Get-Content {sig_file} | gpg --verify")
-            message.append("")
-            message.append("  # Or view the signature:")
-            message.append(f"  Get-Content {sig_file}")
-
-        self._show_simple_dialog(title, message)
+        finally:
+            # Restore curses mode
+            self.stdscr.refresh()
+            curses.doupdate()
 
     def _show_simple_dialog(self, title, message_lines):
         """Display a simple scrollable dialog with the given title and message lines"""
