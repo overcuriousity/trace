@@ -119,13 +119,13 @@ class TUI:
         self.flash_time = time.time()
 
     def verify_note_signature(self):
-        """Show detailed verification dialog for current note with raw signature"""
+        """Show detailed verification dialog for current note with signature export"""
         if not self.current_note:
             return
 
         verified, info = self.current_note.verify_signature()
 
-        # Prepare dialog content
+        # Handle unsigned notes
         if not self.current_note.signature:
             title = "Note Signature Status"
             message = [
@@ -134,8 +134,69 @@ class TUI:
                 "To sign notes, enable GPG signing in settings",
                 "and ensure you have a GPG key configured."
             ]
-            signature_lines = []
-        elif verified:
+            self._show_simple_dialog(title, message)
+            return
+
+        # Save signature to file and attempt clipboard copy
+        import subprocess
+        import platform
+        from pathlib import Path
+
+        sig_file = Path.home() / ".trace" / "last_signature.txt"
+        sig_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            sig_file.write_text(self.current_note.signature)
+            file_saved = True
+        except Exception:
+            file_saved = False
+
+        # Try to copy to clipboard
+        clipboard_success = False
+        clipboard_method = None
+
+        try:
+            system = platform.system()
+            if system == "Linux":
+                # Try xclip first, then xsel
+                try:
+                    subprocess.run(['xclip', '-selection', 'clipboard'],
+                                 input=self.current_note.signature.encode(),
+                                 check=True, timeout=2, capture_output=True)
+                    clipboard_success = True
+                    clipboard_method = "xclip"
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    try:
+                        subprocess.run(['xsel', '--clipboard', '--input'],
+                                     input=self.current_note.signature.encode(),
+                                     check=True, timeout=2, capture_output=True)
+                        clipboard_success = True
+                        clipboard_method = "xsel"
+                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+            elif system == "Darwin":  # macOS
+                try:
+                    subprocess.run(['pbcopy'],
+                                 input=self.current_note.signature.encode(),
+                                 check=True, timeout=2, capture_output=True)
+                    clipboard_success = True
+                    clipboard_method = "pbcopy"
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+            elif system == "Windows":
+                try:
+                    subprocess.run(['clip'],
+                                 input=self.current_note.signature.encode(),
+                                 check=True, timeout=2, capture_output=True)
+                    clipboard_success = True
+                    clipboard_method = "clip"
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+        except Exception:
+            pass
+
+        # Build dialog message based on verification and export status
+        if verified:
             title = "✓ Signature Verified"
             message = [
                 "The note's signature is valid.",
@@ -143,12 +204,7 @@ class TUI:
                 f"Signed by: {info}",
                 "",
                 "This note has not been tampered with since signing.",
-                "",
-                "─" * 60,
-                "RAW PGP SIGNATURE (copy/paste for external verification):",
-                "─" * 60,
             ]
-            signature_lines = self.current_note.signature.split('\n')
         else:
             title = "✗ Signature Verification Failed"
             message = [
@@ -160,28 +216,48 @@ class TUI:
                 "- Public key not in keyring",
                 "- Note content was modified after signing",
                 "- Signature is corrupted",
-                "",
-                "─" * 60,
-                "RAW PGP SIGNATURE (copy/paste for external verification):",
-                "─" * 60,
             ]
-            signature_lines = self.current_note.signature.split('\n')
 
-        # Combine message and signature
-        all_lines = message + signature_lines
+        # Add export status information
+        message.append("")
+        message.append("─" * 60)
 
-        # Display scrollable dialog
+        if clipboard_success:
+            message.append("✓ Signature copied to clipboard!")
+            message.append("")
+            message.append("You can paste it directly into Kleopatra or GPG tools.")
+
+        if file_saved:
+            if clipboard_success:
+                message.append("")
+                message.append("Also saved to file:")
+            else:
+                message.append("✓ Signature saved to file:")
+                message.append("")
+            message.append(f"  {sig_file}")
+            message.append("")
+            message.append("To copy manually, run in another terminal:")
+            message.append(f"  cat {sig_file}")
+
+        if not clipboard_success and not file_saved:
+            message.append("⚠ Could not copy to clipboard or save to file.")
+            message.append("")
+            message.append("Please check file permissions.")
+
+        self._show_simple_dialog(title, message)
+
+    def _show_simple_dialog(self, title, message_lines):
+        """Display a simple scrollable dialog with the given title and message lines"""
         h, w = self.stdscr.getmaxyx()
-        dialog_h = min(h - 4, 40)  # Max height for dialog
-        dialog_w = min(w - 4, 100)  # Max width for dialog
+        dialog_h = min(h - 4, len(message_lines) + 8)
+        dialog_w = min(w - 4, max(len(title) + 4, max((len(line) for line in message_lines), default=40) + 4))
         start_y = (h - dialog_h) // 2
         start_x = (w - dialog_w) // 2
 
-        # Create dialog window
         dialog = curses.newwin(dialog_h, dialog_w, start_y, start_x)
 
         scroll_offset = 0
-        max_scroll = max(0, len(all_lines) - (dialog_h - 6))
+        max_scroll = max(0, len(message_lines) - (dialog_h - 6))
 
         while True:
             dialog.clear()
@@ -189,26 +265,25 @@ class TUI:
 
             # Title
             dialog.attron(curses.A_BOLD)
-            title_x = (dialog_w - len(title)) // 2
+            title_x = max(2, (dialog_w - len(title)) // 2)
             try:
-                dialog.addstr(1, title_x, title)
+                dialog.addstr(1, title_x, title[:dialog_w - 4])
             except curses.error:
                 pass
             dialog.attroff(curses.A_BOLD)
 
             # Display visible lines
-            visible_lines = all_lines[scroll_offset:scroll_offset + dialog_h - 6]
+            visible_lines = message_lines[scroll_offset:scroll_offset + dialog_h - 6]
             for i, line in enumerate(visible_lines):
                 try:
-                    # Truncate line if too long for dialog width
                     truncated_line = line[:dialog_w - 4]
                     dialog.addstr(3 + i, 2, truncated_line)
                 except curses.error:
                     pass
 
-            # Footer with scroll indicators
+            # Footer
             if max_scroll > 0:
-                footer = f"↑/↓ Scroll ({scroll_offset + 1}/{len(all_lines)})  Any other key to close"
+                footer = f"↑/↓ Scroll  Any other key to close"
             else:
                 footer = "Press any key to close"
             footer_x = max(2, (dialog_w - len(footer)) // 2)
@@ -225,12 +300,11 @@ class TUI:
                 scroll_offset -= 1
             elif key == curses.KEY_DOWN and scroll_offset < max_scroll:
                 scroll_offset += 1
-            elif key == curses.KEY_PPAGE:  # Page Up
+            elif key == curses.KEY_PPAGE:
                 scroll_offset = max(0, scroll_offset - (dialog_h - 6))
-            elif key == curses.KEY_NPAGE:  # Page Down
+            elif key == curses.KEY_NPAGE:
                 scroll_offset = min(max_scroll, scroll_offset + (dialog_h - 6))
             else:
-                # Any other key closes the dialog
                 break
 
     def _save_nav_position(self):
