@@ -61,9 +61,9 @@ class Crypto:
                         parts = line.split('"')
                         if len(parts) >= 2:
                             signer_info = parts[1]
-                        break
+                            break  # Only break after successfully extracting signer info
                     elif "using" in line:
-                        # Try to get key ID
+                        # Try to get key ID as fallback
                         if "key" in line.lower():
                             signer_info = line.strip()
 
