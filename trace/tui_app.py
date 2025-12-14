@@ -753,11 +753,12 @@ class TUI:
 
         if not evidence_list:
             # Check if we have space to display the message
-            if y_pos + 2 < self.height - 2:
+            if y_pos + 1 < self.height - 2:
                 self.stdscr.attron(curses.color_pair(3))
-                self.stdscr.addstr(y_pos + 1, 4, "┌─ No evidence items")
-                self.stdscr.addstr(y_pos + 2, 4, "└─ Press 'N' to add evidence")
+                self.stdscr.addstr(y_pos, 4, "┌─ No evidence items")
+                self.stdscr.addstr(y_pos + 1, 4, "└─ Press 'N' to add evidence")
                 self.stdscr.attroff(curses.color_pair(3))
+                y_pos += 2  # Account for the 2 lines used by the message
         else:
             # Scrolling for evidence list
             # Calculate remaining space
