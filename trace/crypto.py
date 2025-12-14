@@ -184,5 +184,25 @@ class Crypto:
 
     @staticmethod
     def hash_content(content: str, timestamp: float) -> str:
+        """Calculate SHA256 hash of timestamp:content.
+
+        Hash input format: "{timestamp}:{content}"
+        - timestamp: Unix epoch timestamp as float (seconds since 1970-01-01 00:00:00 UTC)
+          Example: 1702345678.123456
+        - The float is converted to string using Python's default str() conversion
+        - Colon (':') separator between timestamp and content
+        - Ensures integrity of both WHAT was said and WHEN it was said
+
+        Args:
+            content: The note content to hash
+            timestamp: Unix epoch timestamp as float
+
+        Returns:
+            SHA256 hash as hexadecimal string (64 characters)
+
+        Example:
+            >>> hash_content("Suspicious process detected", 1702345678.123456)
+            Computes SHA256 of: "1702345678.123456:Suspicious process detected"
+        """
         data = f"{timestamp}:{content}".encode('utf-8')
         return hashlib.sha256(data).hexdigest()

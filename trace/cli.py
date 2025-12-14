@@ -364,9 +364,14 @@ def export_markdown(output_file: str = "export.md"):
         sys.exit(1)
 
 def format_note_for_export(note: Note) -> str:
-    """Format a single note for export (returns string instead of writing to file)"""
+    """Format a single note for export (returns string instead of writing to file)
+
+    Includes Unix timestamp for hash reproducibility - anyone can recompute the hash
+    using the formula: SHA256("{unix_timestamp}:{content}")
+    """
     lines = []
     lines.append(f"- **{time.ctime(note.timestamp)}**\n")
+    lines.append(f"  - Unix Timestamp: `{note.timestamp}` (for hash verification)\n")
     lines.append(f"  - Content:\n")
     # Properly indent multi-line content
     for line in note.content.splitlines():

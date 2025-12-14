@@ -222,15 +222,23 @@ class ExportHandler:
 
     @staticmethod
     def _write_note_markdown(f, note: Note):
-        """Helper to write a note in markdown format"""
+        """Helper to write a note in markdown format
+
+        Includes Unix timestamp for hash reproducibility - anyone can recompute the hash
+        using the formula: SHA256("{unix_timestamp}:{content}")
+        """
         f.write(f"- **{time.ctime(note.timestamp)}**\n")
-        f.write(f"  - Content: {note.content}\n")
+        f.write(f"  - Unix Timestamp: `{note.timestamp}` (for hash verification)\n")
+        f.write(f"  - Content:\n")
+        # Properly indent multi-line content
+        for line in note.content.splitlines():
+            f.write(f"    {line}\n")
         if note.tags:
             tags_str = " ".join([f"#{tag}" for tag in note.tags])
             f.write(f"  - Tags: {tags_str}\n")
-        f.write(f"  - Hash: `{note.content_hash}`\n")
+        f.write(f"  - SHA256 Hash (timestamp:content): `{note.content_hash}`\n")
         if note.signature:
-            f.write("  - **Signature Verified:**\n")
+            f.write("  - **GPG Signature of Hash:**\n")
             f.write("    ```\n")
             for line in note.signature.splitlines():
                 f.write(f"    {line}\n")
