@@ -46,8 +46,8 @@ class Crypto:
             # Force English output for consistent parsing across locales
             import os
             env = os.environ.copy()
-            env['LC_ALL'] = 'C'
-            env['LANG'] = 'C'
+            env['LC_ALL'] = 'C.UTF-8'  # Use UTF-8 variant to handle international characters
+            env['LANG'] = 'C.UTF-8'
 
             proc = subprocess.Popen(
                 ['gpg', '--verify'],
@@ -55,6 +55,8 @@ class Crypto:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding='utf-8',
+                errors='replace',  # Replace invalid UTF-8 sequences instead of crashing
                 env=env
             )
             stdout, stderr = proc.communicate(input=signed_content, timeout=10)
