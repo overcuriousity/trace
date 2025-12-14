@@ -1261,7 +1261,7 @@ class TUI:
             self.stdscr.addstr(current_y, 2, "Signature: ? Unsigned", curses.color_pair(3))
             current_y += 1
 
-        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back  [v] Verify", curses.color_pair(3))
+        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back  [V] Verify", curses.color_pair(3))
 
     def draw_help(self):
         """Draw the help screen with keyboard shortcuts and features"""
@@ -1358,7 +1358,7 @@ class TUI:
         help_lines.append(("  Layer 2: Export  Entire export document GPG-signed", curses.A_NORMAL))
         help_lines.append(("                   Dual verification: individual + document level", curses.A_DIM))
         help_lines.append(("  Verification     ✓=verified  ✗=failed  ?=unsigned", curses.A_NORMAL))
-        help_lines.append(("                   Press 'v' on note detail for verification info", curses.A_DIM))
+        help_lines.append(("                   Press 'V' on note detail for verification info", curses.A_DIM))
         help_lines.append(("  GPG Settings     Press 's' to toggle signing & select GPG key", curses.A_NORMAL))
         help_lines.append(("  External Verify  gpg --verify exported-file.md", curses.A_DIM))
         help_lines.append(("", curses.A_NORMAL))
@@ -1749,7 +1749,8 @@ class TUI:
                             self.view_evidence_notes()
                     else:
                         self.view_evidence_notes()
-            elif self.current_view == "note_detail":
+        elif key == ord('V'):
+            if self.current_view == "note_detail":
                 # Verify signature in note detail view
                 if self.current_note:
                     self.verify_note_signature()
