@@ -221,28 +221,53 @@ class TUI:
         # Add export status information
         message.append("")
         message.append("─" * 60)
+        message.append("EXPORT STATUS:")
+        message.append("")
 
+        # Clipboard status with clear feedback
         if clipboard_success:
-            message.append("✓ Signature copied to clipboard!")
+            message.append(f"✓ Clipboard: Copied successfully (using {clipboard_method})")
             message.append("")
-            message.append("You can paste it directly into Kleopatra or GPG tools.")
-
-        if file_saved:
-            if clipboard_success:
-                message.append("")
-                message.append("Also saved to file:")
+            message.append("  You can paste directly into Kleopatra or GPG tools.")
+        else:
+            message.append("✗ Clipboard: Failed to copy")
+            message.append("")
+            if system == "Linux":
+                message.append("  Install xclip or xsel for clipboard support:")
+                message.append("  sudo apt install xclip   # Debian/Ubuntu")
+                message.append("  sudo dnf install xclip   # Fedora")
             else:
-                message.append("✓ Signature saved to file:")
-                message.append("")
-            message.append(f"  {sig_file}")
-            message.append("")
-            message.append("To copy manually, run in another terminal:")
-            message.append(f"  cat {sig_file}")
+                message.append("  Clipboard tool not available on this system.")
 
-        if not clipboard_success and not file_saved:
-            message.append("⚠ Could not copy to clipboard or save to file.")
+        message.append("")
+
+        # File save status
+        if file_saved:
+            message.append(f"✓ File: Saved to {sig_file}")
+        else:
+            message.append("✗ File: Failed to save (check permissions)")
+
+        # Add GPG verification commands if file was saved
+        if file_saved:
             message.append("")
-            message.append("Please check file permissions.")
+            message.append("─" * 60)
+            message.append("VERIFY WITH GPG:")
+            message.append("")
+
+            # Linux/macOS commands
+            message.append("Linux/macOS:")
+            message.append(f"  gpg --verify <(cat {sig_file})")
+            message.append("")
+            message.append("  # Or view the signature:")
+            message.append(f"  cat {sig_file}")
+            message.append("")
+
+            # Windows PowerShell commands
+            message.append("Windows PowerShell:")
+            message.append(f"  Get-Content {sig_file} | gpg --verify")
+            message.append("")
+            message.append("  # Or view the signature:")
+            message.append(f"  Get-Content {sig_file}")
 
         self._show_simple_dialog(title, message)
 
