@@ -49,12 +49,13 @@ def quick_add_note(content: str):
     note.extract_tags()  # Extract hashtags from content
     note.extract_iocs()  # Extract IOCs from content
 
-    # Try signing if enabled
+    # Try signing the hash if enabled
     signature = None
     if settings.get("pgp_enabled", True):
         gpg_key_id = settings.get("gpg_key_id", None)
         if gpg_key_id:
-            signature = Crypto.sign_content(f"Hash: {note.content_hash}\nContent: {note.content}", key_id=gpg_key_id)
+            # Sign only the hash (hash already includes timestamp:content for integrity)
+            signature = Crypto.sign_content(note.content_hash, key_id=gpg_key_id)
             if signature:
                 note.signature = signature
             else:
@@ -79,68 +80,106 @@ def quick_add_note(content: str):
 def export_markdown(output_file: str = "export.md"):
     try:
         storage = Storage()
+        state_manager = StateManager()
+        settings = state_manager.get_settings()
 
+        # Build the export content in memory first
+        content_lines = []
+        content_lines.append("# Forensic Notes Export\n\n")
+        content_lines.append(f"Generated on: {time.ctime()}\n\n")
+
+        for case in storage.cases:
+            content_lines.append(f"## Case: {case.case_number}\n")
+            if case.name:
+                content_lines.append(f"**Name:** {case.name}\n")
+            if case.investigator:
+                content_lines.append(f"**Investigator:** {case.investigator}\n")
+            content_lines.append(f"**Case ID:** {case.case_id}\n\n")
+
+            content_lines.append("### Case Notes\n")
+            if not case.notes:
+                content_lines.append("_No notes._\n")
+            for note in case.notes:
+                note_content = format_note_for_export(note)
+                content_lines.append(note_content)
+
+            content_lines.append("\n### Evidence\n")
+            if not case.evidence:
+                content_lines.append("_No evidence._\n")
+
+            for ev in case.evidence:
+                content_lines.append(f"#### Evidence: {ev.name}\n")
+                if ev.description:
+                    content_lines.append(f"_{ev.description}_\n")
+                content_lines.append(f"**ID:** {ev.evidence_id}\n")
+
+                # Include source hash if available
+                source_hash = ev.metadata.get("source_hash")
+                if source_hash:
+                    content_lines.append(f"**Source Hash:** `{source_hash}`\n")
+                content_lines.append("\n")
+
+                content_lines.append("##### Evidence Notes\n")
+                if not ev.notes:
+                    content_lines.append("_No notes._\n")
+                for note in ev.notes:
+                    note_content = format_note_for_export(note)
+                    content_lines.append(note_content)
+                content_lines.append("\n")
+            content_lines.append("---\n\n")
+
+        # Join all content
+        export_content = "".join(content_lines)
+
+        # Sign the entire export if GPG is enabled
+        if settings.get("pgp_enabled", False):
+            gpg_key_id = settings.get("gpg_key_id", None)
+            signed_export = Crypto.sign_content(export_content, key_id=gpg_key_id)
+
+            if signed_export:
+                # Write the signed version
+                final_content = signed_export
+                print(f"✓ Export signed with GPG")
+            else:
+                # Signing failed - write unsigned
+                final_content = export_content
+                print("⚠ Warning: GPG signing failed. Export saved unsigned.", file=sys.stderr)
+        else:
+            final_content = export_content
+
+        # Write to file
         with open(output_file, "w", encoding='utf-8') as f:
-            f.write("# Forensic Notes Export\n\n")
-            f.write(f"Generated on: {time.ctime()}\n\n")
+            f.write(final_content)
 
-            for case in storage.cases:
-                f.write(f"## Case: {case.case_number}\n")
-                if case.name:
-                    f.write(f"**Name:** {case.name}\n")
-                if case.investigator:
-                    f.write(f"**Investigator:** {case.investigator}\n")
-                f.write(f"**Case ID:** {case.case_id}\n\n")
+        print(f"✓ Exported to {output_file}")
 
-                f.write("### Case Notes\n")
-                if not case.notes:
-                    f.write("_No notes._\n")
-                for note in case.notes:
-                    write_note(f, note)
+        # Show verification instructions
+        if settings.get("pgp_enabled", False) and signed_export:
+            print(f"\nTo verify the export:")
+            print(f"  gpg --verify {output_file}")
 
-                f.write("\n### Evidence\n")
-                if not case.evidence:
-                    f.write("_No evidence._\n")
-
-                for ev in case.evidence:
-                    f.write(f"#### Evidence: {ev.name}\n")
-                    if ev.description:
-                        f.write(f"_{ev.description}_\n")
-                    f.write(f"**ID:** {ev.evidence_id}\n")
-
-                    # Include source hash if available
-                    source_hash = ev.metadata.get("source_hash")
-                    if source_hash:
-                        f.write(f"**Source Hash:** `{source_hash}`\n")
-                    f.write("\n")
-
-                    f.write("##### Evidence Notes\n")
-                    if not ev.notes:
-                        f.write("_No notes._\n")
-                    for note in ev.notes:
-                        write_note(f, note)
-                    f.write("\n")
-                f.write("---\n\n")
-        print(f"Exported to {output_file}")
     except (IOError, OSError, PermissionError) as e:
         print(f"Error: Failed to export to {output_file}: {e}")
         sys.exit(1)
 
-def write_note(f, note: Note):
-    f.write(f"- **{time.ctime(note.timestamp)}**\n")
-    f.write(f"  - Content:\n")
+def format_note_for_export(note: Note) -> str:
+    """Format a single note for export (returns string instead of writing to file)"""
+    lines = []
+    lines.append(f"- **{time.ctime(note.timestamp)}**\n")
+    lines.append(f"  - Content:\n")
     # Properly indent multi-line content
     for line in note.content.splitlines():
-        f.write(f"    {line}\n")
-    f.write(f"  - Hash: `{note.content_hash}`\n")
+        lines.append(f"    {line}\n")
+    lines.append(f"  - SHA256 Hash (timestamp:content): `{note.content_hash}`\n")
     if note.signature:
-        f.write("  - **Signature Verified:**\n")
-        f.write("    ```\n")
+        lines.append("  - **GPG Signature of Hash:**\n")
+        lines.append("    ```\n")
         # Indent signature for markdown block
         for line in note.signature.splitlines():
-             f.write(f"    {line}\n")
-        f.write("    ```\n")
-    f.write("\n")
+            lines.append(f"    {line}\n")
+        lines.append("    ```\n")
+    lines.append("\n")
+    return "".join(lines)
 
 def main():
     parser = argparse.ArgumentParser(description="trace: Forensic Note Taking Tool")
@@ -160,6 +199,10 @@ def main():
     if args.note:
         quick_add_note(args.note)
         return
+
+    # Check for first run and run GPG wizard if needed
+    from .gpg_wizard import check_and_run_wizard
+    check_and_run_wizard()
 
     # Launch TUI (with optional direct navigation to active context)
     try:

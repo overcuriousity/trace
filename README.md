@@ -131,6 +131,181 @@ After this, you can log with just: `t "Your note here"`
 | **Tag System** | Supports `#hashtags` for classification and filtering. | **Efficient triage** of large log sets. |
 | **Minimal Footprint** | Built solely on Python standard library modules. | **Maximum portability** on restricted forensic environments. |
 
+## Cryptographic Integrity & Chain of Custody
+
+`trace` implements a dual-layer cryptographic system designed for legal admissibility and forensic integrity:
+
+### Layer 1: Note-Level Integrity (Always Active)
+
+**Process:**
+1. **Timestamp Generation** - Precise Unix timestamp captured at note creation
+2. **Content Hashing** - SHA256 hash computed from `timestamp:content`
+3. **Optional Signature** - Hash is signed with investigator's GPG private key
+
+**Mathematical Representation:**
+```
+hash = SHA256(timestamp + ":" + content)
+signature = GPG_Sign(hash, private_key)
+```
+
+**Security Properties:**
+- **Temporal Integrity**: Timestamp is cryptographically bound to content (cannot backdate notes)
+- **Tamper Detection**: Any modification to content or timestamp invalidates the hash
+- **Non-Repudiation**: GPG signature proves who created the note (if signing enabled)
+- **Efficient Storage**: Signing only the hash (64 hex chars) instead of full content
+
+### Layer 2: Export-Level Integrity (On Demand)
+
+When exporting to markdown (`--export`), the **entire export document** is GPG-signed if signing is enabled.
+
+**Process:**
+1. Generate complete markdown export with all cases, evidence, and notes
+2. Individual note signatures are preserved within the export
+3. Entire document is clearsigned with GPG
+
+**Security Properties:**
+- **Document Integrity**: Proves export hasn't been modified after generation
+- **Dual Verification**: Both individual notes AND complete document can be verified
+- **Chain of Custody**: Establishes provenance from evidence collection through report generation
+
+### First-Run GPG Setup
+
+On first launch, `trace` runs an interactive wizard to configure GPG signing:
+
+1. **GPG Detection** - Checks if GPG is installed (gracefully continues without if missing)
+2. **Key Selection** - Lists available secret keys from your GPG keyring
+3. **Configuration** - Saves selected key ID to `~/.trace/settings.json`
+
+**If GPG is not available:**
+- Application continues to function normally
+- Notes are hashed (SHA256) but not signed
+- You can enable GPG later by editing `~/.trace/settings.json`
+
+### Verification Workflows
+
+#### Internal Verification (Within trace TUI)
+
+The TUI automatically verifies signatures and displays status symbols:
+- `✓` - Signature verified with public key in keyring
+- `✗` - Signature verification failed (tampered or missing key)
+- `?` - Note is unsigned
+
+**To verify a specific note:**
+1. Navigate to the note in TUI
+2. Press `Enter` to view note details
+3. Press `v` to see detailed verification information
+
+#### External Verification (Manual/Court)
+
+**Scenario**: Forensic investigator sends evidence to court/auditor
+
+**Step 1 - Investigator exports evidence:**
+```bash
+# Export all notes with signatures
+trace --export --output investigation-2024-001.md
+
+# Export public key for verification
+gpg --armor --export investigator@agency.gov > investigator-pubkey.asc
+
+# Send both files to recipient
+```
+
+**Step 2 - Recipient verifies document:**
+```bash
+# Import investigator's public key
+gpg --import investigator-pubkey.asc
+
+# Verify entire export document
+gpg --verify investigation-2024-001.md
+```
+
+**Expected output if valid:**
+```
+gpg: Signature made Mon Dec 13 14:23:45 2024
+gpg: using RSA key ABC123DEF456
+gpg: Good signature from "John Investigator <investigator@agency.gov>"
+```
+
+**Step 3 - Verify individual notes (optional):**
+
+Individual note signatures are embedded in the markdown export. To verify a specific note:
+
+1. Open `investigation-2024-001.md` in a text editor
+2. Locate the note's signature block:
+   ```
+   - **GPG Signature of Hash:**
+     ```
+     -----BEGIN PGP SIGNED MESSAGE-----
+     Hash: SHA256
+
+     a3f5b2c8d9e1f4a7b6c3d8e2f5a9b4c7d1e6f3a8b5c2d9e4f7a1b8c6d3e0f5a2
+     -----BEGIN PGP SIGNATURE-----
+     ...
+     -----END PGP SIGNATURE-----
+     ```
+3. Extract the signature block (from `-----BEGIN PGP SIGNED MESSAGE-----` to `-----END PGP SIGNATURE-----`)
+4. Save to a file and verify:
+   ```bash
+   cat > note-signature.txt
+   <paste signature block>
+   Ctrl+D
+
+   gpg --verify note-signature.txt
+   ```
+
+**What gets verified:**
+- The SHA256 hash proves the note content and timestamp haven't changed
+- The GPG signature proves who created that hash
+- Together: Proves this specific content was created by this investigator at this time
+
+### Cryptographic Trust Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Note Creation (Investigator)                           │
+├─────────────────────────────────────────────────────────┤
+│ 1. Content: "Malware detected on host-192.168.1.50"   │
+│ 2. Timestamp: 1702483425.123456                        │
+│ 3. Hash: SHA256(timestamp:content)                     │
+│    → a3f5b2c8d9e1f4a7b6c3d8e2f5a9b4c7...              │
+│ 4. Signature: GPG_Sign(hash, private_key)             │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ Export Generation                                       │
+├─────────────────────────────────────────────────────────┤
+│ 1. Build markdown with all notes + individual sigs     │
+│ 2. Sign entire document: GPG_Sign(document)            │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ Verification (Court/Auditor)                           │
+├─────────────────────────────────────────────────────────┤
+│ 1. Import investigator's public key                    │
+│ 2. Verify document signature → Proves export integrity │
+│ 3. Verify individual notes → Proves note authenticity  │
+│ 4. Recompute hashes → Proves content hasn't changed   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Security Considerations
+
+**What is protected:**
+- ✓ Content integrity (hash detects any modification)
+- ✓ Temporal integrity (timestamp cryptographically bound)
+- ✓ Attribution (signature proves who created it)
+- ✓ Export completeness (document signature proves no additions/removals)
+
+**What is NOT protected:**
+- ✗ Note deletion (signatures can't prevent removal from database)
+- ✗ Selective disclosure (investigator can choose which notes to export)
+- ✗ Sequential ordering (signatures are per-note, not chained)
+
+**Trust Dependencies:**
+- You must trust the investigator's GPG key (verify fingerprint out-of-band)
+- You must trust the investigator's system clock was accurate
+- You must trust the investigator didn't destroy contradictory evidence
+
 ## TUI Reference (Management Console)
 
 Execute `trace` (no arguments) to enter the Text User Interface. This environment is used for setup, review, and reporting.

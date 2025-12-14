@@ -4,7 +4,7 @@ import time
 import hashlib
 import uuid
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 from .extractors import TagExtractor, IOCExtractor
 
@@ -31,6 +31,23 @@ class Note:
         # We hash the content + timestamp to ensure integrity of 'when' it was said
         data = f"{self.timestamp}:{self.content}".encode('utf-8')
         self.content_hash = hashlib.sha256(data).hexdigest()
+
+    def verify_signature(self) -> Tuple[bool, str]:
+        """
+        Verify the GPG signature of this note.
+
+        Returns:
+            A tuple of (verified: bool, info: str)
+            - verified: True if signature is valid, False if invalid or unsigned
+            - info: Signer information or error/status message
+        """
+        # Import here to avoid circular dependency
+        from ..crypto import Crypto
+
+        if not self.signature:
+            return False, "unsigned"
+
+        return Crypto.verify_signature(self.signature)
 
     @staticmethod
     def extract_iocs_from_text(text):
