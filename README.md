@@ -22,6 +22,76 @@ trace "Observed outbound connection to 192.168.1.55 on port 80. #suspicious #net
 
 **System Integrity Chain:** Each command-line note is immediately stamped, concatenated with its content, and hashed using SHA256 before storage. This ensures a non-repudiable log entry.
 
+## CLI Command Reference
+
+### Context Management
+
+View and switch between cases and evidence without opening the TUI:
+
+```bash
+# Show current active case and evidence
+trace --show-context
+
+# List all cases and evidence in hierarchy
+trace --list
+
+# Switch active case (by case number or UUID)
+trace --switch-case 2024-001
+
+# Switch active evidence (by name or UUID, within active case)
+trace --switch-evidence "disk-image-1"
+```
+
+### Case and Evidence Creation
+
+Create new cases and evidence directly from the command line:
+
+```bash
+# Create new case (automatically becomes active)
+trace --new-case 2024-001
+
+# Create case with full metadata
+trace --new-case 2024-001 --name "Ransomware Investigation" --investigator "Jane Doe"
+
+# Create evidence in active case (automatically becomes active)
+trace --new-evidence "Laptop HDD"
+
+# Create evidence with description
+trace --new-evidence "Server Logs" --description "Apache logs from compromised server"
+```
+
+### Advanced Note-Taking
+
+Beyond basic hot logging, trace supports stdin piping and context overrides:
+
+```bash
+# Pipe command output directly into notes
+ps aux | grep malware | trace --stdin
+tail -f /var/log/auth.log | grep "Failed password" | trace --stdin
+netstat -an | trace --stdin
+
+# Add note to specific case without changing active context
+trace --case 2024-002 "Found malware in temp folder"
+
+# Add note to specific evidence without changing active context
+trace --evidence "Memory Dump" "Suspicious process identified"
+
+# Override both case and evidence for a single note
+trace --case 2024-001 --evidence "Disk Image" "Recovered deleted files"
+```
+
+**Identifiers:** All commands accept both human-friendly identifiers (case numbers like `2024-001`, evidence names like `Laptop HDD`) and UUIDs. Use `--list` to see available identifiers.
+
+### Export
+
+```bash
+# Export all data to markdown (GPG-signed if enabled)
+trace --export --output investigation-report.md
+
+# Export with default filename (trace_export.md)
+trace --export
+```
+
 ## Installation & Deployment
 
 ### Quick Install from Latest Release
