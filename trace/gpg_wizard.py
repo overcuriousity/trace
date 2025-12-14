@@ -115,10 +115,9 @@ def check_and_run_wizard():
     Returns True if wizard was run, False otherwise.
     """
     state_manager = StateManager()
-    settings = state_manager.get_settings()
 
-    # Check if wizard has already been run (presence of any GPG setting indicates setup was done)
-    if "pgp_enabled" in settings:
+    # Check if settings file exists - if it does, wizard has already been run
+    if state_manager.settings_file.exists():
         return False
 
     # First run - run wizard
