@@ -44,9 +44,13 @@ class Crypto:
 
         try:
             # Force English output for consistent parsing across locales
+            # Linux/macOS: LC_ALL/LANG variables control GPG's output language
+            # Windows: GPG may ignore these, but encoding='utf-8' + errors='replace' provides robustness
             import os
             env = os.environ.copy()
-            env['LC_ALL'] = 'C.UTF-8'  # Use UTF-8 variant to handle international characters
+            # Use C.UTF-8 for English messages with UTF-8 encoding support
+            # Falls back gracefully via errors='replace' if locale not available
+            env['LC_ALL'] = 'C.UTF-8'
             env['LANG'] = 'C.UTF-8'
 
             proc = subprocess.Popen(
@@ -56,7 +60,7 @@ class Crypto:
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='replace',  # Replace invalid UTF-8 sequences instead of crashing
+                errors='replace',  # Handle encoding issues on any platform
                 env=env
             )
             stdout, stderr = proc.communicate(input=signed_content, timeout=10)
