@@ -76,27 +76,23 @@ def run_gpg_wizard():
     # Let user select a key
     selected_key = None
 
-    if len(keys) == 1:
-        print(f"Only one key found. Using: {keys[0][1]}")
-        selected_key = keys[0][0]
-    else:
-        while True:
-            try:
-                choice = input(f"Select a key (1-{len(keys)}, or 0 to use default key): ").strip()
-                choice_num = int(choice)
+    while True:
+        try:
+            choice = input(f"Select a key (1-{len(keys)}, or 0 to use default key): ").strip()
+            choice_num = int(choice)
 
-                if choice_num == 0:
-                    print("Using GPG default key (no specific key ID)")
-                    selected_key = None
-                    break
-                elif 1 <= choice_num <= len(keys):
-                    selected_key = keys[choice_num - 1][0]
-                    print(f"Selected: {keys[choice_num - 1][1]}")
-                    break
-                else:
-                    print(f"Please enter a number between 0 and {len(keys)}")
-            except ValueError:
-                print("Please enter a valid number")
+            if choice_num == 0:
+                print("Using GPG default key (no specific key ID)")
+                selected_key = None
+                break
+            elif 1 <= choice_num <= len(keys):
+                selected_key = keys[choice_num - 1][0]
+                print(f"Selected: {keys[choice_num - 1][1]}")
+                break
+            else:
+                print(f"Please enter a number between 0 and {len(keys)}")
+        except ValueError:
+            print("Please enter a valid number")
 
     print("\n✓ GPG signing enabled!")
     if selected_key:
