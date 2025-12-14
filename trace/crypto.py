@@ -43,12 +43,19 @@ class Crypto:
             return False, "Not a GPG signed message"
 
         try:
+            # Force English output for consistent parsing across locales
+            import os
+            env = os.environ.copy()
+            env['LC_ALL'] = 'C'
+            env['LANG'] = 'C'
+
             proc = subprocess.Popen(
                 ['gpg', '--verify'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=env
             )
             stdout, stderr = proc.communicate(input=signed_content, timeout=10)
 
