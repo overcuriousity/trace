@@ -9,6 +9,8 @@ class Layout:
     CONTENT_INDENT = 4
     FOOTER_OFFSET_FROM_BOTTOM = 3
     BORDER_OFFSET_FROM_BOTTOM = 2
+    STATUS_LINE_OFFSET_FROM_BOTTOM = 1  # height - 1 for status bar
+    NOTE_DETAIL_BOTTOM_RESERVE = 6  # height - 6 for note detail view
 
 
 class Spacing:
@@ -18,14 +20,32 @@ class Spacing:
     DIALOG_MARGIN = 4
     HORIZONTAL_PADDING = 6  # width - 6 for truncation
     HASH_DISPLAY_PADDING = 20  # width - 20
+    HASH_SHORT_PADDING = 12  # width - 12 for shorter hash displays
+    EMPTY_STATE_PADDING = 8  # width - 8 for empty state boxes
+    STATUS_BAR_PADDING = 2  # width - 2 for status bar
 
 
 class ColumnWidths:
-    """Fixed column widths for list displays"""
-    TAG_COLUMN = 30
-    IOC_COLUMN = 50
-    CONTENT_PREVIEW = 50
-    NOTE_PREVIEW = 60
+    """Column widths for list displays - can be percentage-based"""
+    TAG_COLUMN_MIN = 30
+    IOC_COLUMN_MIN = 50
+    CONTENT_PREVIEW_MIN = 50
+    NOTE_PREVIEW_MIN = 60
+
+    @staticmethod
+    def get_tag_width(terminal_width):
+        """Get responsive tag column width (40% of terminal or min 30)"""
+        return max(ColumnWidths.TAG_COLUMN_MIN, int(terminal_width * 0.4))
+
+    @staticmethod
+    def get_ioc_width(terminal_width):
+        """Get responsive IOC column width (50% of terminal or min 50)"""
+        return max(ColumnWidths.IOC_COLUMN_MIN, int(terminal_width * 0.5))
+
+    @staticmethod
+    def get_content_preview_width(terminal_width):
+        """Get responsive content preview width (50% of terminal or min 50)"""
+        return max(ColumnWidths.CONTENT_PREVIEW_MIN, int(terminal_width * 0.5))
 
 
 class DialogSize:

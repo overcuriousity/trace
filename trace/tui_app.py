@@ -421,7 +421,7 @@ class TUI:
         """
         # Calculate centering
         box_width = max(len(message), len(hint) if hint else 0) + 4
-        box_width = min(box_width, self.width - 8)
+        box_width = min(box_width, self.width - Spacing.EMPTY_STATE_PADDING)
         x_start = max(4, (self.width - box_width) // 2)
 
         self.stdscr.attron(curses.color_pair(ColorPairs.WARNING))
@@ -550,7 +550,7 @@ class TUI:
         # Top border line
         try:
             self.stdscr.attron(curses.color_pair(ColorPairs.BORDER))
-            self.stdscr.addstr(0, 0, "─" * self.width)
+            self.stdscr.addstr(0, 0, Icons.SEPARATOR_H * self.width)
             self.stdscr.attroff(curses.color_pair(ColorPairs.BORDER))
         except curses.error:
             pass
@@ -593,20 +593,20 @@ class TUI:
             if self.global_active_case_id:
                 c = self.storage.get_case(self.global_active_case_id)
                 if c:
-                    icon = "●"
-                    status_text = f"{icon} {c.case_number}"
-                    attr = curses.color_pair(ColorPairs.SUCCESS)  # Green for active
+                    icon = Icons.ACTIVE
+                    status_text = f"{icon} ACTIVE: {c.case_number}"
+                    attr = curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD  # Green + bold for active
                     if self.global_active_evidence_id:
                         _, ev = self.storage.find_evidence(self.global_active_evidence_id)
                         if ev:
-                            status_text += f"  ▸  {ev.name}"
+                            status_text += f" {Icons.ARROW_RIGHT} {ev.name}"
             else:
-                icon = "○"
+                icon = Icons.INACTIVE
                 status_text = f"{icon} No active context"
                 attr = curses.color_pair(ColorPairs.METADATA) | curses.A_DIM
 
         # Truncate if too long
-        max_status_len = self.width - 2
+        max_status_len = self.width - Spacing.STATUS_BAR_PADDING
         if len(status_text) > max_status_len:
             status_text = status_text[:max_status_len-1] + "…"
 
@@ -614,15 +614,15 @@ class TUI:
         try:
             # Border line above status
             self.stdscr.attron(curses.color_pair(ColorPairs.BORDER))
-            self.stdscr.addstr(self.height - 2, 0, "─" * self.width)
+            self.stdscr.addstr(self.height - Layout.BORDER_OFFSET_FROM_BOTTOM, 0, Icons.SEPARATOR_H * self.width)
             self.stdscr.attroff(curses.color_pair(ColorPairs.BORDER))
 
             # Status text
             self.stdscr.attron(attr)
-            self.stdscr.addstr(self.height - 1, 1, status_text)
+            self.stdscr.addstr(self.height - Layout.STATUS_LINE_OFFSET_FROM_BOTTOM, 1, status_text)
             remaining = self.width - len(status_text) - 2
             if remaining > 0:
-                self.stdscr.addstr(self.height - 1, len(status_text) + 1, " " * remaining)
+                self.stdscr.addstr(self.height - Layout.STATUS_LINE_OFFSET_FROM_BOTTOM, len(status_text) + 1, " " * remaining)
             self.stdscr.attroff(attr)
         except curses.error:
             pass # Ignore bottom-right corner write errors
@@ -734,7 +734,7 @@ class TUI:
                 display_str += "  │  " + "  ".join(metadata)
 
             # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
                 # Highlighted selection
@@ -819,7 +819,7 @@ class TUI:
 
         if not evidence_list:
             # Check if we have space to display the message
-            if y_pos + 1 < self.height - 2:
+            if y_pos + 1 < self.height - Layout.BORDER_OFFSET_FROM_BOTTOM:
                 self.stdscr.attron(curses.color_pair(ColorPairs.WARNING))
                 self.stdscr.addstr(y_pos, 4, "┌─ No evidence items")
                 self.stdscr.addstr(y_pos + 1, 4, "└─ Press 'N' to add evidence")
@@ -899,7 +899,7 @@ class TUI:
                     display_str += "  │  " + "  ".join(metadata)
 
                 # Truncate safely
-                base_display = self._safe_truncate(display_str, self.width - 6)
+                base_display = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
                 # Check if this evidence item is selected
                 if evidence_idx == self.selected_index:
@@ -976,7 +976,7 @@ class TUI:
                 # Add verification symbol
                 verify_symbol = self._get_verification_symbol(note)
                 display_str = f"{verify_symbol} {note_content}"
-                display_str = self._safe_truncate(display_str, self.width - 6)
+                display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
                 # Display with smart highlighting (IOCs take priority over selection)
                 item_idx = len(evidence_list) + note_idx
@@ -999,7 +999,7 @@ class TUI:
         source_hash = self.active_evidence.metadata.get("source_hash")
         if source_hash:
             # Truncate hash if too long for display
-            hash_display = self._safe_truncate(source_hash, self.width - 20)
+            hash_display = self._safe_truncate(source_hash, self.width - Spacing.HASH_DISPLAY_PADDING)
             self.stdscr.addstr(current_y, 2, f"Source Hash: {hash_display}", curses.color_pair(ColorPairs.WARNING))
             current_y += 1
 
@@ -1044,7 +1044,7 @@ class TUI:
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} {note_content}"
             # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             # Display with smart highlighting (IOCs take priority over selection)
             is_selected = (idx == self.selected_index)
@@ -1088,7 +1088,8 @@ class TUI:
             tag, count = tags_to_show[idx]
             y = 5 + i
 
-            display_str = f"#{tag}".ljust(ColumnWidths.TAG_COLUMN) + f"({count} notes)"
+            tag_width = ColumnWidths.get_tag_width(self.width)
+            display_str = f"#{tag}".ljust(tag_width) + f"({count} notes)"
             display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
@@ -1142,7 +1143,7 @@ class TUI:
             # Add verification symbol
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
                 self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
@@ -1191,7 +1192,8 @@ class TUI:
             y = 5 + i
 
             # Show IOC with warning icon, type indicator and count in red
-            display_str = f"{Icons.WARNING} {ioc} [{ioc_type}]".ljust(ColumnWidths.IOC_COLUMN + 2) + f"({count} notes)"
+            ioc_width = ColumnWidths.get_ioc_width(self.width)
+            display_str = f"{Icons.WARNING} {ioc} [{ioc_type}]".ljust(ioc_width + 2) + f"({count} notes)"
             display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
@@ -1242,7 +1244,7 @@ class TUI:
             # Add verification symbol
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
                 self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
@@ -1289,11 +1291,11 @@ class TUI:
         max_content_lines = self.content_h - (current_y - 2) - 6  # Reserve space for hash/sig
 
         for line in content_lines[:max_content_lines]:
-            if current_y >= self.height - 6:
+            if current_y >= self.height - Layout.NOTE_DETAIL_BOTTOM_RESERVE:
                 break
 
             # Highlight both tags and IOCs in the content
-            display_line = self._safe_truncate(line, self.width - 6)
+            display_line = self._safe_truncate(line, self.width - Spacing.HORIZONTAL_PADDING)
             
             # Display with highlighting (no selection in detail view)
             try:
@@ -1307,7 +1309,7 @@ class TUI:
 
         # Hash
         if self.current_note.content_hash:
-            hash_display = self._safe_truncate(self.current_note.content_hash, self.width - 12)
+            hash_display = self._safe_truncate(self.current_note.content_hash, self.width - Spacing.HASH_SHORT_PADDING)
             self.stdscr.addstr(current_y, 2, f"Hash: {hash_display}", curses.A_DIM)
             current_y += 1
 
@@ -1335,7 +1337,7 @@ class TUI:
     def draw_help(self):
         """Draw the help screen with keyboard shortcuts and features"""
         self.stdscr.addstr(2, 2, "trace - Help & Keyboard Shortcuts", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "═" * (self.width - 4))
+        self.stdscr.addstr(3, Layout.HEADER_X, "═" * (self.width - Spacing.DIALOG_MARGIN))
 
         # Build help content as a list of lines
         help_lines = []
@@ -1477,7 +1479,7 @@ class TUI:
                 break
 
             # Truncate if needed
-            display_text = self._safe_truncate(text, self.width - 4)
+            display_text = self._safe_truncate(text, self.width - Spacing.DIALOG_MARGIN)
 
             try:
                 self.stdscr.addstr(y, 2, display_text, attr)
@@ -2499,8 +2501,8 @@ class TUI:
                     break
 
         curses.curs_set(0)
-        h = min(len(key_options) + 6, self.height - 4)
-        w = min(70, self.width - 4)
+        h = min(len(key_options) + 6, self.height - Spacing.DIALOG_MARGIN)
+        w = min(70, self.width - Spacing.DIALOG_MARGIN)
         y = (self.height - h) // 2
         x = (self.width - w) // 2
 
@@ -2573,7 +2575,7 @@ class TUI:
         # Calculate size based on message
         lines = message.split('\n')
         h = len(lines) + 5
-        w = min(max(len(line) for line in lines) + 6, self.width - 4)
+        w = min(max(len(line) for line in lines) + 6, self.width - Spacing.DIALOG_MARGIN)
         y = (self.height - h) // 2
         x = (self.width - w) // 2
 
