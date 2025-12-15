@@ -6,6 +6,11 @@ from .storage import Storage, StateManager
 
 class TUI:
     def __init__(self, stdscr):
+        # Import here to avoid circular import issues
+        global ColorPairs, Layout, Spacing, ColumnWidths, DialogSize, Icons, Timing, init_colors
+        from trace.tui.rendering.colors import init_colors, ColorPairs
+        from trace.tui.visual_constants import Layout, Spacing, ColumnWidths, DialogSize, Icons, Timing
+
         self.stdscr = stdscr
         self.storage = Storage()
         self.state_manager = StateManager()
@@ -41,29 +46,8 @@ class TUI:
         self.flash_time = 0
 
         # UI Config
-        curses.curs_set(0) # Hide cursor
-        curses.start_color()
-        if curses.has_colors():
-            # Selection / Highlight
-            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
-            # Success / Active indicators
-            curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-            # Info / Warnings
-            curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-            # Errors / Critical / IOCs
-            curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
-            # Headers / Titles (bright cyan)
-            curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
-            # Metadata / Secondary text (dim)
-            curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
-            # Borders / Separators (blue)
-            curses.init_pair(7, curses.COLOR_BLUE, curses.COLOR_BLACK)
-            # Tags (magenta)
-            curses.init_pair(8, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-            # IOCs on selected background (red on cyan)
-            curses.init_pair(9, curses.COLOR_RED, curses.COLOR_CYAN)
-            # Tags on selected background (yellow on cyan)
-            curses.init_pair(10, curses.COLOR_YELLOW, curses.COLOR_CYAN)
+        curses.curs_set(0)  # Hide cursor
+        init_colors()  # Initialize color pairs from colors.py
 
         self.height, self.width = stdscr.getmaxyx()
 
@@ -86,8 +70,8 @@ class TUI:
             self.draw_status_bar()
 
             # Content area bounds
-            self.content_y = 2
-            self.content_h = self.height - 4 # Reserve top 2, bottom 2
+            self.content_y = Layout.CONTENT_START_Y
+            self.content_h = self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM - 1  # Reserve top, bottom
 
             if self.current_view == "case_list":
                 self.draw_case_list()
@@ -166,8 +150,8 @@ class TUI:
     def _show_simple_dialog(self, title, message_lines):
         """Display a simple scrollable dialog with the given title and message lines"""
         h, w = self.stdscr.getmaxyx()
-        dialog_h = min(h - 4, len(message_lines) + 8)
-        dialog_w = min(w - 4, max(len(title) + 4, max((len(line) for line in message_lines), default=40) + 4))
+        dialog_h = min(h - Spacing.DIALOG_MARGIN, len(message_lines) + 8)
+        dialog_w = min(w - Spacing.DIALOG_MARGIN, max(len(title) + Spacing.DIALOG_MARGIN, max((len(line) for line in message_lines), default=40) + Spacing.DIALOG_MARGIN))
         start_y = (h - dialog_h) // 2
         start_x = (w - dialog_w) // 2
 
@@ -205,7 +189,7 @@ class TUI:
                 footer = "Press any key to close"
             footer_x = max(2, (dialog_w - len(footer)) // 2)
             try:
-                dialog.addstr(dialog_h - 2, footer_x, footer[:dialog_w - 4], curses.color_pair(3))
+                dialog.addstr(dialog_h - 2, footer_x, footer[:dialog_w - 4], curses.color_pair(ColorPairs.WARNING))
             except curses.error:
                 pass
 
@@ -362,10 +346,16 @@ class TUI:
         self.selected_index = self._restore_nav_position("ioc_list", self.active_case, self.active_evidence)
         self.scroll_offset = 0
 
-    def _safe_truncate(self, text, max_width, ellipsis="..."):
+    def _safe_truncate(self, text, max_width, ellipsis="...", word_break=True):
         """
         Safely truncate text to fit within max_width, handling Unicode characters.
         Uses a conservative approach to avoid curses display errors.
+
+        Args:
+            text: Text to truncate
+            max_width: Maximum width in characters
+            ellipsis: Ellipsis string to append
+            word_break: If True, try to break at word boundaries for better readability
         """
         if not text:
             return text
@@ -381,6 +371,13 @@ class TUI:
         # Truncate conservatively (character by character) to handle multi-byte UTF-8
         target_len = max_width - len(ellipsis)
         truncated = text[:target_len]
+
+        # Try to break at word boundary if requested
+        if word_break and ' ' in truncated:
+            # Find the last space before the truncation point
+            last_space = truncated.rfind(' ')
+            if last_space > max_width * 0.6:  # Only if we don't lose too much text (>60% retained)
+                truncated = truncated[:last_space]
 
         # Encode and check actual byte length to be safe with UTF-8
         # If it's too long, trim further
@@ -413,12 +410,48 @@ class TUI:
         verified, _ = note.verify_signature()
         return "✓" if verified else "✗"
 
+    def _draw_empty_state(self, y_start, message, hint=None):
+        """
+        Draw an improved empty state message with visual structure.
+
+        Args:
+            y_start: Starting y position
+            message: Main message to display
+            hint: Optional hint text (e.g., "Press 'N' to create first case")
+        """
+        # Calculate centering
+        box_width = max(len(message), len(hint) if hint else 0) + 4
+        box_width = min(box_width, self.width - Spacing.EMPTY_STATE_PADDING)
+        x_start = max(4, (self.width - box_width) // 2)
+
+        self.stdscr.attron(curses.color_pair(ColorPairs.WARNING))
+
+        # Draw centered box with message
+        self.stdscr.addstr(y_start, x_start, Icons.BOX_TL + Icons.SEPARATOR_H * (box_width - 2) + Icons.BOX_TL)
+        self.stdscr.addstr(y_start + 1, x_start, Icons.SEPARATOR_V)
+
+        # Center the message
+        msg_x = x_start + (box_width - len(message)) // 2
+        self.stdscr.addstr(y_start + 1, msg_x, message, curses.A_BOLD)
+        self.stdscr.addstr(y_start + 1, x_start + box_width - 1, Icons.SEPARATOR_V)
+
+        if hint:
+            self.stdscr.addstr(y_start + 2, x_start, Icons.SEPARATOR_V)
+            hint_x = x_start + (box_width - len(hint)) // 2
+            self.stdscr.addstr(y_start + 2, hint_x, hint)
+            self.stdscr.addstr(y_start + 2, x_start + box_width - 1, Icons.SEPARATOR_V)
+            self.stdscr.addstr(y_start + 3, x_start, Icons.BOX_BL + Icons.SEPARATOR_H * (box_width - 2) + Icons.BOX_BL)
+        else:
+            self.stdscr.addstr(y_start + 2, x_start, Icons.BOX_BL + Icons.SEPARATOR_H * (box_width - 2) + Icons.BOX_BL)
+
+        self.stdscr.attroff(curses.color_pair(ColorPairs.WARNING))
+
     def _display_line_with_highlights(self, y, x_start, line, is_selected=False, win=None):
         """
         Display a line with intelligent highlighting.
-        - IOCs are highlighted with color_pair(4) (red)
-        - Tags are highlighted with color_pair(3) (yellow)
-        - Selection background is color_pair(1) (cyan) for non-IOC text
+        - IOCs are highlighted with ColorPairs.ERROR (red)
+        - Tags are highlighted with ColorPairs.TAG (magenta)
+        - Selection background is ColorPairs.SELECTION (cyan) for non-IOC text
         - IOC highlighting takes priority over selection
         """
         import re
@@ -451,9 +484,9 @@ class TUI:
         if not highlights:
             # No highlights - use selection color if selected
             if is_selected:
-                screen.attron(curses.color_pair(1))
+                screen.attron(curses.color_pair(ColorPairs.SELECTION))
                 screen.addstr(y, x_start, line)
-                screen.attroff(curses.color_pair(1))
+                screen.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 screen.addstr(y, x_start, line)
             return
@@ -467,9 +500,9 @@ class TUI:
             if start > last_pos:
                 text_before = line[last_pos:start]
                 if is_selected:
-                    screen.attron(curses.color_pair(1))
+                    screen.attron(curses.color_pair(ColorPairs.SELECTION))
                     screen.addstr(y, x_pos, text_before)
-                    screen.attroff(curses.color_pair(1))
+                    screen.attroff(curses.color_pair(ColorPairs.SELECTION))
                 else:
                     screen.addstr(y, x_pos, text_before)
                 x_pos += len(text_before)
@@ -478,23 +511,23 @@ class TUI:
             if htype == 'ioc':
                 # IOC highlighting: red on cyan if selected, red on black otherwise
                 if is_selected:
-                    screen.attron(curses.color_pair(9) | curses.A_BOLD)
+                    screen.attron(curses.color_pair(ColorPairs.IOC_SELECTED) | curses.A_BOLD)
                     screen.addstr(y, x_pos, text)
-                    screen.attroff(curses.color_pair(9) | curses.A_BOLD)
+                    screen.attroff(curses.color_pair(ColorPairs.IOC_SELECTED) | curses.A_BOLD)
                 else:
-                    screen.attron(curses.color_pair(4) | curses.A_BOLD)
+                    screen.attron(curses.color_pair(ColorPairs.ERROR) | curses.A_BOLD)
                     screen.addstr(y, x_pos, text)
-                    screen.attroff(curses.color_pair(4) | curses.A_BOLD)
+                    screen.attroff(curses.color_pair(ColorPairs.ERROR) | curses.A_BOLD)
             else:  # tag
-                # Tag highlighting: yellow on cyan if selected, yellow on black otherwise
+                # Tag highlighting: magenta on cyan if selected, magenta on black otherwise
                 if is_selected:
-                    screen.attron(curses.color_pair(10))
+                    screen.attron(curses.color_pair(ColorPairs.TAG_SELECTED))
                     screen.addstr(y, x_pos, text)
-                    screen.attroff(curses.color_pair(10))
+                    screen.attroff(curses.color_pair(ColorPairs.TAG_SELECTED))
                 else:
-                    screen.attron(curses.color_pair(3))
+                    screen.attron(curses.color_pair(ColorPairs.TAG))
                     screen.addstr(y, x_pos, text)
-                    screen.attroff(curses.color_pair(3))
+                    screen.attroff(curses.color_pair(ColorPairs.TAG))
             
             x_pos += len(text)
             last_pos = end
@@ -503,9 +536,9 @@ class TUI:
         if last_pos < len(line):
             text_after = line[last_pos:]
             if is_selected:
-                screen.attron(curses.color_pair(1))
+                screen.attron(curses.color_pair(ColorPairs.SELECTION))
                 screen.addstr(y, x_pos, text_after)
-                screen.attroff(curses.color_pair(1))
+                screen.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 screen.addstr(y, x_pos, text_after)
 
@@ -516,80 +549,80 @@ class TUI:
 
         # Top border line
         try:
-            self.stdscr.attron(curses.color_pair(7))
-            self.stdscr.addstr(0, 0, "─" * self.width)
-            self.stdscr.attroff(curses.color_pair(7))
+            self.stdscr.attron(curses.color_pair(ColorPairs.BORDER))
+            self.stdscr.addstr(0, 0, Icons.SEPARATOR_H * self.width)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.BORDER))
         except curses.error:
             pass
 
         # Title line with gradient effect
         try:
             # Icon and main title
-            self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.attron(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
             self.stdscr.addstr(0, 2, title)
-            self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
 
             # Subtitle
-            self.stdscr.attron(curses.color_pair(6))
+            self.stdscr.attron(curses.color_pair(ColorPairs.METADATA))
             self.stdscr.addstr(0, 2 + len(title) + 2, subtitle)
-            self.stdscr.attroff(curses.color_pair(6))
+            self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA))
         except curses.error:
             pass
 
     def draw_status_bar(self):
         # Determine status text
         status_text = ""
-        attr = curses.color_pair(1)
+        attr = curses.color_pair(ColorPairs.SELECTION)
 
         # Check for flash message (display for 3 seconds)
         icon = ""
         if self.flash_message and (time.time() - self.flash_time < 3):
             if "Failed" in self.flash_message or "Error" in self.flash_message:
                 icon = "✗"
-                attr = curses.color_pair(4)  # Red
+                attr = curses.color_pair(ColorPairs.ERROR)  # Red
             else:
                 icon = "✓"
-                attr = curses.color_pair(2)  # Green
+                attr = curses.color_pair(ColorPairs.SUCCESS)  # Green
             status_text = f"{icon} {self.flash_message}"
         elif self.filter_mode:
             icon = "◈"
             status_text = f"{icon} Filter: {self.filter_query}"
-            attr = curses.color_pair(3)
+            attr = curses.color_pair(ColorPairs.WARNING)
         else:
             # Active context display
             if self.global_active_case_id:
                 c = self.storage.get_case(self.global_active_case_id)
                 if c:
-                    icon = "●"
-                    status_text = f"{icon} {c.case_number}"
-                    attr = curses.color_pair(2)  # Green for active
+                    icon = Icons.ACTIVE
+                    status_text = f"{icon} ACTIVE: {c.case_number}"
+                    attr = curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD  # Green + bold for active
                     if self.global_active_evidence_id:
                         _, ev = self.storage.find_evidence(self.global_active_evidence_id)
                         if ev:
-                            status_text += f"  ▸  {ev.name}"
+                            status_text += f" {Icons.ARROW_RIGHT} {ev.name}"
             else:
-                icon = "○"
+                icon = Icons.INACTIVE
                 status_text = f"{icon} No active context"
-                attr = curses.color_pair(6) | curses.A_DIM
+                attr = curses.color_pair(ColorPairs.METADATA) | curses.A_DIM
 
         # Truncate if too long
-        max_status_len = self.width - 2
+        max_status_len = self.width - Spacing.STATUS_BAR_PADDING
         if len(status_text) > max_status_len:
             status_text = status_text[:max_status_len-1] + "…"
 
         # Bottom line with border
         try:
             # Border line above status
-            self.stdscr.attron(curses.color_pair(7))
-            self.stdscr.addstr(self.height - 2, 0, "─" * self.width)
-            self.stdscr.attroff(curses.color_pair(7))
+            self.stdscr.attron(curses.color_pair(ColorPairs.BORDER))
+            self.stdscr.addstr(self.height - Layout.BORDER_OFFSET_FROM_BOTTOM, 0, Icons.SEPARATOR_H * self.width)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.BORDER))
 
             # Status text
             self.stdscr.attron(attr)
-            self.stdscr.addstr(self.height - 1, 1, status_text)
+            self.stdscr.addstr(self.height - Layout.STATUS_LINE_OFFSET_FROM_BOTTOM, 1, status_text)
             remaining = self.width - len(status_text) - 2
             if remaining > 0:
-                self.stdscr.addstr(self.height - 1, len(status_text) + 1, " " * remaining)
+                self.stdscr.addstr(self.height - Layout.STATUS_LINE_OFFSET_FROM_BOTTOM, len(status_text) + 1, " " * remaining)
             self.stdscr.attroff(attr)
         except curses.error:
             pass # Ignore bottom-right corner write errors
@@ -643,24 +676,21 @@ class TUI:
 
     def draw_case_list(self):
         # Header with icon
-        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.attron(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
         self.stdscr.addstr(2, 2, "■ Cases")
-        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.attroff(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
 
         if not self.cases:
-            self.stdscr.attron(curses.color_pair(3))
-            self.stdscr.addstr(4, 4, "┌─ No cases found")
-            self.stdscr.addstr(5, 4, "└─ Press 'N' to create your first case")
-            self.stdscr.attroff(curses.color_pair(3))
-            self.stdscr.addstr(self.height - 3, 2, "[N] New Case  [q] Quit", curses.color_pair(3))
+            self._draw_empty_state(5, "No cases found", "Press 'N' to create your first case")
+            self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, "[N] New Case  [q] Quit", curses.color_pair(ColorPairs.WARNING))
             return
 
         display_cases = self._get_filtered_list(self.cases, "case_number", "name")
 
         # Show count
-        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.attron(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
         self.stdscr.addstr(2, 12, f"({len(display_cases)} total)")
-        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
 
         list_h = self._update_scroll(len(display_cases))
 
@@ -704,31 +734,28 @@ class TUI:
                 display_str += "  │  " + "  ".join(metadata)
 
             # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
                 # Highlighted selection
-                self.stdscr.attron(curses.color_pair(1))
+                self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 # Normal item - color the active indicator if active
                 if is_active:
-                    self.stdscr.attron(curses.color_pair(2) | curses.A_BOLD)
+                    self.stdscr.attron(curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD)
                     self.stdscr.addstr(y, 4, prefix)
-                    self.stdscr.attroff(curses.color_pair(2) | curses.A_BOLD)
+                    self.stdscr.attroff(curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD)
                     # Rest of line in normal color
                     self.stdscr.addstr(display_str[len(prefix):])
                 else:
                     self.stdscr.addstr(y, 4, display_str)
 
         if not display_cases and self.cases:
-            self.stdscr.attron(curses.color_pair(3))
-            self.stdscr.addstr(4, 4, "┌─ No cases match filter")
-            self.stdscr.addstr(5, 4, "└─ Press ESC to clear filter")
-            self.stdscr.attroff(curses.color_pair(3))
+            self._draw_empty_state(5, "No cases match filter", "Press ESC to clear filter")
 
-        self.stdscr.addstr(self.height - 3, 2, "[N] New Case  [n] Add Note  [Enter] Select  [a] Active  [d] Delete  [/] Filter  [s] Settings  [?] Help", curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, "[N] New Case  [n] Add Note  [Enter] Select  [a] Active  [d] Delete  [/] Filter  [s] Settings  [?] Help", curses.color_pair(ColorPairs.WARNING))
 
     def draw_case_detail(self):
         if not self.active_case: return
@@ -736,28 +763,28 @@ class TUI:
         case_note_count = len(self.active_case.notes)
 
         # Header with case info
-        self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.attron(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
         self.stdscr.addstr(2, 2, f"■ {self.active_case.case_number}")
-        self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.attroff(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
 
         if self.active_case.name:
-            self.stdscr.attron(curses.color_pair(6))
+            self.stdscr.attron(curses.color_pair(ColorPairs.METADATA))
             self.stdscr.addstr(f"  │  {self.active_case.name}")
-            self.stdscr.attroff(curses.color_pair(6))
+            self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA))
 
         # Metadata section
         y_pos = 3
         if self.active_case.investigator:
-            self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.attron(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
             self.stdscr.addstr(y_pos, 4, f"◆ Investigator:")
-            self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
             self.stdscr.addstr(f" {self.active_case.investigator}")
             y_pos += 1
 
-        self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+        self.stdscr.attron(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
         self.stdscr.addstr(y_pos, 4, f"◆ Case Notes:")
-        self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
-        note_color = curses.color_pair(2) if case_note_count > 0 else curses.color_pair(6)
+        self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
+        note_color = curses.color_pair(ColorPairs.SUCCESS) if case_note_count > 0 else curses.color_pair(ColorPairs.METADATA)
         self.stdscr.attron(note_color)
         self.stdscr.addstr(f" {case_note_count}")
         self.stdscr.attroff(note_color)
@@ -778,25 +805,25 @@ class TUI:
         selecting_evidence = self.selected_index < len(evidence_list)
 
         # Evidence section header
-        if y_pos < self.height - 3:
-            self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+        if y_pos < self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM:
+            self.stdscr.attron(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
             self.stdscr.addstr(y_pos, 2, "▪ Evidence")
-            self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
 
             # Show count
-            self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.attron(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
             self.stdscr.addstr(y_pos, 14, f"({len(evidence_list)} items)")
-            self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+            self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
 
         y_pos += 1
 
         if not evidence_list:
             # Check if we have space to display the message
-            if y_pos + 1 < self.height - 2:
-                self.stdscr.attron(curses.color_pair(3))
+            if y_pos + 1 < self.height - Layout.BORDER_OFFSET_FROM_BOTTOM:
+                self.stdscr.attron(curses.color_pair(ColorPairs.WARNING))
                 self.stdscr.addstr(y_pos, 4, "┌─ No evidence items")
                 self.stdscr.addstr(y_pos + 1, 4, "└─ Press 'N' to add evidence")
-                self.stdscr.attroff(curses.color_pair(3))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.WARNING))
                 y_pos += 2  # Account for the 2 lines used by the message
         else:
             # Scrolling for evidence list
@@ -833,7 +860,7 @@ class TUI:
 
                 ev = evidence_list[evidence_idx]
                 y = y_pos + i
-                if y >= self.height - 3:  # Don't overflow into status bar
+                if y >= self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM:  # Don't overflow into status bar
                     break
 
                 note_count = len(ev.notes)
@@ -872,29 +899,29 @@ class TUI:
                     display_str += "  │  " + "  ".join(metadata)
 
                 # Truncate safely
-                base_display = self._safe_truncate(display_str, self.width - 6)
+                base_display = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
                 # Check if this evidence item is selected
                 if evidence_idx == self.selected_index:
                     # Highlighted selection
-                    self.stdscr.attron(curses.color_pair(1))
+                    self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                     self.stdscr.addstr(y, 4, base_display)
-                    self.stdscr.attroff(curses.color_pair(1))
+                    self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
                 else:
                     # Normal item - highlight active indicator if active
                     if is_active:
-                        self.stdscr.attron(curses.color_pair(2) | curses.A_BOLD)
+                        self.stdscr.attron(curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD)
                         self.stdscr.addstr(y, 4, prefix)
-                        self.stdscr.attroff(curses.color_pair(2) | curses.A_BOLD)
+                        self.stdscr.attroff(curses.color_pair(ColorPairs.SUCCESS) | curses.A_BOLD)
                         # Rest in normal, but highlight IOC warning in red
                         rest_of_line = base_display[len(prefix):]
                         if ioc_count > 0 and "⚠" in rest_of_line:
                             # Split and color the IOC part
                             parts = rest_of_line.split("⚠")
                             self.stdscr.addstr(parts[0])
-                            self.stdscr.attron(curses.color_pair(4))
+                            self.stdscr.attron(curses.color_pair(ColorPairs.ERROR))
                             self.stdscr.addstr("⚠" + parts[1])
-                            self.stdscr.attroff(curses.color_pair(4))
+                            self.stdscr.attroff(curses.color_pair(ColorPairs.ERROR))
                         else:
                             self.stdscr.addstr(rest_of_line)
                     else:
@@ -902,9 +929,9 @@ class TUI:
                         if ioc_count > 0 and "⚠" in base_display:
                             parts = base_display.split("⚠")
                             self.stdscr.addstr(y, 4, parts[0])
-                            self.stdscr.attron(curses.color_pair(4))
+                            self.stdscr.attron(curses.color_pair(ColorPairs.ERROR))
                             self.stdscr.addstr("⚠" + parts[1])
-                            self.stdscr.attroff(curses.color_pair(4))
+                            self.stdscr.attroff(curses.color_pair(ColorPairs.ERROR))
                         else:
                             self.stdscr.addstr(y, 4, base_display)
 
@@ -913,13 +940,13 @@ class TUI:
         # Case Notes section
         if case_notes:
             y_pos += 2
-            if y_pos < self.height - 3:
-                self.stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
+            if y_pos < self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM:
+                self.stdscr.attron(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
                 self.stdscr.addstr(y_pos, 2, "▪ Case Notes")
-                self.stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
-                self.stdscr.attron(curses.color_pair(6) | curses.A_DIM)
+                self.stdscr.attroff(curses.color_pair(ColorPairs.HEADER) | curses.A_BOLD)
+                self.stdscr.attron(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
                 self.stdscr.addstr(y_pos, 16, f"({len(case_notes)} notes)")
-                self.stdscr.attroff(curses.color_pair(6) | curses.A_DIM)
+                self.stdscr.attroff(curses.color_pair(ColorPairs.METADATA) | curses.A_DIM)
             y_pos += 1
 
             # Calculate remaining space for case notes
@@ -941,7 +968,7 @@ class TUI:
                 y = y_pos + i
                 
                 # Check if we're out of bounds
-                if y >= self.height - 3:
+                if y >= self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM:
                     break
 
                 # Format note content
@@ -949,14 +976,14 @@ class TUI:
                 # Add verification symbol
                 verify_symbol = self._get_verification_symbol(note)
                 display_str = f"{verify_symbol} {note_content}"
-                display_str = self._safe_truncate(display_str, self.width - 6)
+                display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
                 # Display with smart highlighting (IOCs take priority over selection)
                 item_idx = len(evidence_list) + note_idx
                 is_selected = (item_idx == self.selected_index)
                 self._display_line_with_highlights(y, 4, display_str, is_selected)
 
-        self.stdscr.addstr(self.height - 3, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View  [e] Export  [a] Active  [d] Delete  [?] Help", curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, "[N] New Evidence  [n] Add Note  [t] Tags  [i] IOCs  [v] View  [e] Export  [a] Active  [d] Delete  [?] Help", curses.color_pair(ColorPairs.WARNING))
 
     def draw_evidence_detail(self):
         if not self.active_evidence: return
@@ -972,8 +999,8 @@ class TUI:
         source_hash = self.active_evidence.metadata.get("source_hash")
         if source_hash:
             # Truncate hash if too long for display
-            hash_display = self._safe_truncate(source_hash, self.width - 20)
-            self.stdscr.addstr(current_y, 2, f"Source Hash: {hash_display}", curses.color_pair(3))
+            hash_display = self._safe_truncate(source_hash, self.width - Spacing.HASH_DISPLAY_PADDING)
+            self.stdscr.addstr(current_y, 2, f"Source Hash: {hash_display}", curses.color_pair(ColorPairs.WARNING))
             current_y += 1
 
         # Count and display IOCs
@@ -981,9 +1008,9 @@ class TUI:
         ioc_count = len(ev_iocs)
         if ioc_count > 0:
             ioc_display = f"({ioc_count} IOCs detected)"
-            self.stdscr.attron(curses.color_pair(4))  # Red
+            self.stdscr.attron(curses.color_pair(ColorPairs.ERROR))  # Red
             self.stdscr.addstr(current_y, 2, ioc_display)
-            self.stdscr.attroff(curses.color_pair(4))
+            self.stdscr.attroff(curses.color_pair(ColorPairs.ERROR))
             current_y += 1
 
         current_y += 1  # Blank line before notes
@@ -1017,16 +1044,16 @@ class TUI:
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} {note_content}"
             # Truncate safely for Unicode
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             # Display with smart highlighting (IOCs take priority over selection)
             is_selected = (idx == self.selected_index)
             self._display_line_with_highlights(start_y + i, 4, display_str, is_selected)
 
-        footer = "[n] Add Note  [t] Tags  [i] IOCs  [v] View  [e] Export  [a] Active  [d] Delete  [/] Filter  [?] Help"
+        footer = f"[n] Add Note {Icons.SEPARATOR_GROUP} [t] Tags [i] IOCs {Icons.SEPARATOR_GROUP} [v] View [e] Export {Icons.SEPARATOR_GROUP} [a] Active [d] Delete {Icons.SEPARATOR_GROUP} [/] Filter [?] Help"
         if self.filter_query:
             footer += f"  Filter: {self.filter_query}"
-        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
 
     def draw_tags_list(self):
         """Draw the tags list view showing all tags sorted by occurrence count"""
@@ -1034,7 +1061,7 @@ class TUI:
         context_name = self.active_case.case_number if self.active_case else (self.active_evidence.name if self.active_evidence else "")
 
         self.stdscr.addstr(2, 2, f"Tags for {context}: {context_name}", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "─" * (self.width - 4))
+        self.stdscr.addstr(3, 2, Icons.SEPARATOR_H * (self.width - Spacing.DIALOG_MARGIN))
 
         # Apply filter if active (filter by tag name)
         tags_to_show = self.current_tags
@@ -1044,11 +1071,11 @@ class TUI:
 
         if not tags_to_show:
             msg = "No tags match filter." if self.filter_query else "No tags found."
-            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
-            footer = "[b] Back  [/] Filter"
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(ColorPairs.WARNING))
+            footer = f"[b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
             if self.filter_query:
                 footer += f"  Filter: {self.filter_query}"
-            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+            self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
             return
 
         list_h = self._update_scroll(len(tags_to_show))
@@ -1061,20 +1088,24 @@ class TUI:
             tag, count = tags_to_show[idx]
             y = 5 + i
 
-            display_str = f"#{tag}".ljust(30) + f"({count} notes)"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            tag_width = ColumnWidths.get_tag_width(self.width)
+            display_str = f"#{tag}".ljust(tag_width) + f"({count} notes)"
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
-                self.stdscr.attron(curses.color_pair(1))
+                self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
+                # Use magenta color for tags
+                self.stdscr.attron(curses.color_pair(ColorPairs.TAG))
                 self.stdscr.addstr(y, 4, display_str)
+                self.stdscr.attroff(curses.color_pair(ColorPairs.TAG))
 
-        footer = "[Enter] View Notes  [b] Back  [/] Filter"
+        footer = f"[Enter] View Notes {Icons.SEPARATOR_GROUP} [b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
         if self.filter_query:
             footer += f"  Filter: {self.filter_query}"
-        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
 
     def draw_tag_notes_list(self):
         """Draw compact list of notes containing the selected tag"""
@@ -1082,15 +1113,15 @@ class TUI:
         notes_to_show = self._get_filtered_list(self.tag_notes, "content") if self.filter_query else self.tag_notes
 
         self.stdscr.addstr(2, 2, f"Notes tagged with #{self.current_tag} ({len(notes_to_show)})", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "─" * (self.width - 4))
+        self.stdscr.addstr(3, 2, Icons.SEPARATOR_H * (self.width - Spacing.DIALOG_MARGIN))
 
         if not notes_to_show:
             msg = "No notes match filter." if self.filter_query else "No notes found."
-            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
-            footer = "[b] Back  [/] Filter"
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(ColorPairs.WARNING))
+            footer = f"[b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
             if self.filter_query:
                 footer += f"  Filter: {self.filter_query}"
-            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+            self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
             return
 
         list_h = self._update_scroll(len(notes_to_show))
@@ -1112,19 +1143,19 @@ class TUI:
             # Add verification symbol
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
-                self.stdscr.attron(curses.color_pair(1))
+                self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 self.stdscr.addstr(y, 4, display_str)
 
-        footer = "[Enter] Expand  [d] Delete  [b] Back  [/] Filter"
+        footer = f"[Enter] Expand {Icons.SEPARATOR_GROUP} [d] Delete [b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
         if self.filter_query:
             footer += f"  Filter: {self.filter_query}"
-        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
 
     def draw_ioc_list(self):
         """Draw the IOC list view showing all IOCs sorted by occurrence count"""
@@ -1132,7 +1163,7 @@ class TUI:
         context_name = self.active_case.case_number if self.active_case else (self.active_evidence.name if self.active_evidence else "")
 
         self.stdscr.addstr(2, 2, f"IOCs for {context}: {context_name}", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "─" * (self.width - 4))
+        self.stdscr.addstr(3, 2, Icons.SEPARATOR_H * (self.width - Spacing.DIALOG_MARGIN))
 
         # Apply filter if active (filter by IOC value or type)
         iocs_to_show = self.current_iocs
@@ -1143,11 +1174,11 @@ class TUI:
 
         if not iocs_to_show:
             msg = "No IOCs match filter." if self.filter_query else "No IOCs found."
-            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
-            footer = "[b] Back  [e] Export  [/] Filter"
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(ColorPairs.WARNING))
+            footer = f"[b] Back {Icons.SEPARATOR_GROUP} [e] Export {Icons.SEPARATOR_GROUP} [/] Filter"
             if self.filter_query:
                 footer += f"  Filter: {self.filter_query}"
-            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+            self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
             return
 
         list_h = self._update_scroll(len(iocs_to_show))
@@ -1160,24 +1191,25 @@ class TUI:
             ioc, count, ioc_type = iocs_to_show[idx]
             y = 5 + i
 
-            # Show IOC with type indicator and count in red
-            display_str = f"{ioc} [{ioc_type}]".ljust(50) + f"({count} notes)"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            # Show IOC with warning icon, type indicator and count in red
+            ioc_width = ColumnWidths.get_ioc_width(self.width)
+            display_str = f"{Icons.WARNING} {ioc} [{ioc_type}]".ljust(ioc_width + 2) + f"({count} notes)"
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
-                self.stdscr.attron(curses.color_pair(1))
+                self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 # Use red color for IOCs
-                self.stdscr.attron(curses.color_pair(4))
+                self.stdscr.attron(curses.color_pair(ColorPairs.ERROR))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(4))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.ERROR))
 
-        footer = "[Enter] View Notes  [e] Export  [b] Back  [/] Filter"
+        footer = f"[Enter] View Notes {Icons.SEPARATOR_GROUP} [e] Export [b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
         if self.filter_query:
             footer += f"  Filter: {self.filter_query}"
-        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
 
     def draw_ioc_notes_list(self):
         """Draw compact list of notes containing the selected IOC"""
@@ -1185,15 +1217,15 @@ class TUI:
         notes_to_show = self._get_filtered_list(self.ioc_notes, "content") if self.filter_query else self.ioc_notes
 
         self.stdscr.addstr(2, 2, f"Notes with IOC: {self.current_ioc} ({len(notes_to_show)})", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "─" * (self.width - 4))
+        self.stdscr.addstr(3, 2, Icons.SEPARATOR_H * (self.width - Spacing.DIALOG_MARGIN))
 
         if not notes_to_show:
             msg = "No notes match filter." if self.filter_query else "No notes found."
-            self.stdscr.addstr(5, 4, msg, curses.color_pair(3))
-            footer = "[b] Back  [e] Export  [/] Filter"
+            self.stdscr.addstr(5, 4, msg, curses.color_pair(ColorPairs.WARNING))
+            footer = f"[b] Back {Icons.SEPARATOR_GROUP} [e] Export {Icons.SEPARATOR_GROUP} [/] Filter"
             if self.filter_query:
                 footer += f"  Filter: {self.filter_query}"
-            self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+            self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
             return
 
         list_h = self._update_scroll(len(notes_to_show))
@@ -1212,19 +1244,19 @@ class TUI:
             # Add verification symbol
             verify_symbol = self._get_verification_symbol(note)
             display_str = f"{verify_symbol} [{timestamp_str}] {content_preview}"
-            display_str = self._safe_truncate(display_str, self.width - 6)
+            display_str = self._safe_truncate(display_str, self.width - Spacing.HORIZONTAL_PADDING)
 
             if idx == self.selected_index:
-                self.stdscr.attron(curses.color_pair(1))
+                self.stdscr.attron(curses.color_pair(ColorPairs.SELECTION))
                 self.stdscr.addstr(y, 4, display_str)
-                self.stdscr.attroff(curses.color_pair(1))
+                self.stdscr.attroff(curses.color_pair(ColorPairs.SELECTION))
             else:
                 self.stdscr.addstr(y, 4, display_str)
 
-        footer = "[Enter] Expand  [d] Delete  [e] Export  [b] Back  [/] Filter"
+        footer = f"[Enter] Expand {Icons.SEPARATOR_GROUP} [d] Delete [e] Export [b] Back {Icons.SEPARATOR_GROUP} [/] Filter"
         if self.filter_query:
             footer += f"  Filter: {self.filter_query}"
-        self.stdscr.addstr(self.height - 3, 2, footer[:self.width - 4], curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, footer[:self.width - Spacing.DIALOG_MARGIN], curses.color_pair(ColorPairs.WARNING))
 
     def draw_note_detail(self):
         """Draw expanded view of a single note with all details"""
@@ -1232,7 +1264,7 @@ class TUI:
             return
 
         self.stdscr.addstr(2, 2, "Note Details", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "─" * (self.width - 4))
+        self.stdscr.addstr(3, 2, Icons.SEPARATOR_H * (self.width - Spacing.DIALOG_MARGIN))
 
         current_y = 5
 
@@ -1245,7 +1277,7 @@ class TUI:
         if self.current_note.tags:
             tags_str = " ".join([f"#{tag}" for tag in self.current_note.tags])
             self.stdscr.addstr(current_y, 2, "Tags: ", curses.A_BOLD)
-            self.stdscr.addstr(current_y, 8, tags_str, curses.color_pair(3))
+            self.stdscr.addstr(current_y, 8, tags_str, curses.color_pair(ColorPairs.WARNING))
             current_y += 1
 
         current_y += 1
@@ -1259,11 +1291,11 @@ class TUI:
         max_content_lines = self.content_h - (current_y - 2) - 6  # Reserve space for hash/sig
 
         for line in content_lines[:max_content_lines]:
-            if current_y >= self.height - 6:
+            if current_y >= self.height - Layout.NOTE_DETAIL_BOTTOM_RESERVE:
                 break
 
             # Highlight both tags and IOCs in the content
-            display_line = self._safe_truncate(line, self.width - 6)
+            display_line = self._safe_truncate(line, self.width - Spacing.HORIZONTAL_PADDING)
             
             # Display with highlighting (no selection in detail view)
             try:
@@ -1277,7 +1309,7 @@ class TUI:
 
         # Hash
         if self.current_note.content_hash:
-            hash_display = self._safe_truncate(self.current_note.content_hash, self.width - 12)
+            hash_display = self._safe_truncate(self.current_note.content_hash, self.width - Spacing.HASH_SHORT_PADDING)
             self.stdscr.addstr(current_y, 2, f"Hash: {hash_display}", curses.A_DIM)
             current_y += 1
 
@@ -1286,32 +1318,32 @@ class TUI:
             verified, info = self.current_note.verify_signature()
             if verified:
                 sig_display = f"Signature: ✓ Verified ({info})"
-                self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(2))
+                self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(ColorPairs.SUCCESS))
             else:
                 if info == "unsigned":
                     sig_display = "Signature: ? Unsigned"
-                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(3))
+                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(ColorPairs.WARNING))
                 else:
                     sig_display = f"Signature: ✗ Failed ({info})"
-                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(4))
+                    self.stdscr.addstr(current_y, 2, sig_display, curses.color_pair(ColorPairs.ERROR))
             current_y += 1
         else:
             # No signature present
-            self.stdscr.addstr(current_y, 2, "Signature: ? Unsigned", curses.color_pair(3))
+            self.stdscr.addstr(current_y, 2, "Signature: ? Unsigned", curses.color_pair(ColorPairs.WARNING))
             current_y += 1
 
-        self.stdscr.addstr(self.height - 3, 2, "[d] Delete  [b] Back  [V] Verify", curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, "[d] Delete  [b] Back  [V] Verify", curses.color_pair(ColorPairs.WARNING))
 
     def draw_help(self):
         """Draw the help screen with keyboard shortcuts and features"""
         self.stdscr.addstr(2, 2, "trace - Help & Keyboard Shortcuts", curses.A_BOLD)
-        self.stdscr.addstr(3, 2, "═" * (self.width - 4))
+        self.stdscr.addstr(3, Layout.HEADER_X, "═" * (self.width - Spacing.DIALOG_MARGIN))
 
         # Build help content as a list of lines
         help_lines = []
 
         # General Navigation
-        help_lines.append(("GENERAL NAVIGATION", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("GENERAL NAVIGATION", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Arrow Keys       Navigate lists and menus", curses.A_NORMAL))
         help_lines.append(("  Enter            Select item / Open", curses.A_NORMAL))
         help_lines.append(("  b                Go back to previous view", curses.A_NORMAL))
@@ -1320,7 +1352,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Case List View
-        help_lines.append(("CASE LIST VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("CASE LIST VIEW", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  N                Create new case", curses.A_NORMAL))
         help_lines.append(("  n                Add note to active context", curses.A_NORMAL))
         help_lines.append(("  a                Set selected case as active", curses.A_NORMAL))
@@ -1331,7 +1363,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Case Detail View
-        help_lines.append(("CASE DETAIL VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("CASE DETAIL VIEW", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  N                Create new evidence item", curses.A_NORMAL))
         help_lines.append(("  n                Add note to case", curses.A_NORMAL))
         help_lines.append(("  t                View tags across case and all evidence", curses.A_NORMAL))
@@ -1344,7 +1376,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Evidence Detail View
-        help_lines.append(("EVIDENCE DETAIL VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("EVIDENCE DETAIL VIEW", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  n                Add note to evidence", curses.A_NORMAL))
         help_lines.append(("  t                View tags for this evidence", curses.A_NORMAL))
         help_lines.append(("  i                View IOCs for this evidence", curses.A_NORMAL))
@@ -1355,20 +1387,20 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Tags View
-        help_lines.append(("TAGS VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("TAGS VIEW", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Enter            View all notes with selected tag", curses.A_NORMAL))
         help_lines.append(("  b                Return to previous view", curses.A_NORMAL))
         help_lines.append(("", curses.A_NORMAL))
 
         # IOCs View
-        help_lines.append(("IOCs VIEW", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("IOCs VIEW", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Enter            View all notes containing selected IOC", curses.A_NORMAL))
         help_lines.append(("  e                Export IOCs to text file", curses.A_NORMAL))
         help_lines.append(("  b                Return to previous view", curses.A_NORMAL))
         help_lines.append(("", curses.A_NORMAL))
 
         # Note Editor
-        help_lines.append(("NOTE EDITOR", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("NOTE EDITOR", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Arrow Keys       Navigate within text", curses.A_NORMAL))
         help_lines.append(("  Enter            New line (multi-line notes supported)", curses.A_NORMAL))
         help_lines.append(("  Backspace        Delete character", curses.A_NORMAL))
@@ -1377,7 +1409,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Features
-        help_lines.append(("FEATURES", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("FEATURES", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Active Context   Set with 'a' key - enables CLI quick notes", curses.A_NORMAL))
         help_lines.append(("                   Run: trace \"your note text\"", curses.A_DIM))
         help_lines.append(("  Tags             Use #hashtag in notes for auto-tagging", curses.A_NORMAL))
@@ -1391,7 +1423,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Cryptographic Integrity
-        help_lines.append(("CRYPTOGRAPHIC INTEGRITY", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("CRYPTOGRAPHIC INTEGRITY", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Layer 1: Notes   SHA256(timestamp:content) proves integrity", curses.A_NORMAL))
         help_lines.append(("                   GPG signature of hash proves authenticity", curses.A_DIM))
         help_lines.append(("  Layer 2: Export  Entire export document GPG-signed", curses.A_NORMAL))
@@ -1403,7 +1435,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Data Location
-        help_lines.append(("DATA STORAGE", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("DATA STORAGE", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  All data:        ~/.trace/data.json", curses.A_NORMAL))
         help_lines.append(("  Active context:  ~/.trace/state", curses.A_NORMAL))
         help_lines.append(("  Settings:        ~/.trace/settings.json", curses.A_NORMAL))
@@ -1411,7 +1443,7 @@ class TUI:
         help_lines.append(("", curses.A_NORMAL))
 
         # Demo Case Note
-        help_lines.append(("GETTING STARTED", curses.A_BOLD | curses.color_pair(2)))
+        help_lines.append(("GETTING STARTED", curses.A_BOLD | curses.color_pair(ColorPairs.SUCCESS)))
         help_lines.append(("  Demo Case        A sample case (DEMO-2024-001) showcases all features", curses.A_NORMAL))
         help_lines.append(("                   Explore evidence, notes, tags, and IOCs", curses.A_DIM))
         help_lines.append(("                   Delete it when ready: select and press 'd'", curses.A_DIM))
@@ -1443,11 +1475,11 @@ class TUI:
             text, attr = help_lines[line_idx]
             y = y_offset + i
 
-            if y >= self.height - 3:
+            if y >= self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM:
                 break
 
             # Truncate if needed
-            display_text = self._safe_truncate(text, self.width - 4)
+            display_text = self._safe_truncate(text, self.width - Spacing.DIALOG_MARGIN)
 
             try:
                 self.stdscr.addstr(y, 2, display_text, attr)
@@ -1458,11 +1490,11 @@ class TUI:
         if total_lines > list_h:
             scroll_info = f"[{self.scroll_offset + 1}-{min(self.scroll_offset + list_h, total_lines)} of {total_lines}]"
             try:
-                self.stdscr.addstr(self.height - 3, self.width - len(scroll_info) - 2, scroll_info, curses.color_pair(3))
+                self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, self.width - len(scroll_info) - 2, scroll_info, curses.color_pair(ColorPairs.WARNING))
             except curses.error:
                 pass
 
-        self.stdscr.addstr(self.height - 3, 2, "[Arrow Keys] Scroll  [b/q/?] Close", curses.color_pair(3))
+        self.stdscr.addstr(self.height - Layout.FOOTER_OFFSET_FROM_BOTTOM, 2, "[Arrow Keys] Scroll  [b/q/?] Close", curses.color_pair(ColorPairs.WARNING))
 
     def handle_input(self, key):
         if self.filter_mode:
@@ -1927,20 +1959,20 @@ class TUI:
 
         # Calculate dimensions - taller to show prompt and footer
         h = 6 if prompt else 4
-        w = min(60, self.width - 4)
+        w = min(DialogSize.MEDIUM[0], self.width - Spacing.DIALOG_MARGIN)
         y = self.height // 2 - 3
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
         win.box()
-        win.attron(curses.A_BOLD | curses.color_pair(1))
+        win.attron(curses.A_BOLD | curses.color_pair(ColorPairs.SELECTION))
         win.addstr(0, 2, f" {title} ", curses.A_BOLD)
-        win.attroff(curses.A_BOLD | curses.color_pair(1))
+        win.attroff(curses.A_BOLD | curses.color_pair(ColorPairs.SELECTION))
 
         # Show prompt if provided
         input_y = 1
         if prompt:
-            win.addstr(1, 2, prompt, curses.color_pair(3))
+            win.addstr(1, 2, prompt, curses.color_pair(ColorPairs.WARNING))
             input_y = 3
 
         # Footer with cancel instruction
@@ -2095,8 +2127,8 @@ class TUI:
         prompt_lines = prompt.count('\n') + 1 if prompt else 0
 
         # Dialog height: title(1) + prompt + recent notes + input area + footer(2) + borders
-        dialog_h = min(self.height - 4, 4 + prompt_lines + recent_note_lines + max_lines + 2)
-        dialog_w = min(70, self.width - 4)
+        dialog_h = min(self.height - Spacing.DIALOG_MARGIN, 4 + prompt_lines + recent_note_lines + max_lines + 2)
+        dialog_w = min(DialogSize.LARGE[0], self.width - Spacing.DIALOG_MARGIN)
         dialog_y = max(2, (self.height - dialog_h) // 2)
         dialog_x = (self.width - dialog_w) // 2
 
@@ -2104,10 +2136,10 @@ class TUI:
         win.box()
 
         # Title
-        win.attron(curses.A_BOLD | curses.color_pair(1))
+        win.attron(curses.A_BOLD | curses.color_pair(ColorPairs.SELECTION))
         title_text = f" {title} "
         win.addstr(0, 2, title_text[:dialog_w-4])
-        win.attroff(curses.A_BOLD | curses.color_pair(1))
+        win.attroff(curses.A_BOLD | curses.color_pair(ColorPairs.SELECTION))
 
         current_y = 1
 
@@ -2115,7 +2147,7 @@ class TUI:
         if prompt:
             for line in prompt.split('\n'):
                 if current_y < dialog_h - 2:
-                    win.addstr(current_y, 2, line[:dialog_w-4], curses.color_pair(3))
+                    win.addstr(current_y, 2, line[:dialog_w-4], curses.color_pair(ColorPairs.WARNING))
                     current_y += 1
 
         # Show recent notes inline (non-blocking!)
@@ -2133,7 +2165,7 @@ class TUI:
                 max_preview_len = dialog_w - 18  # Account for timestamp and padding
                 note_preview = self._safe_truncate(note_content_single_line, max_preview_len)
                 try:
-                    win.addstr(current_y, 2, f"[{timestamp_str}] {note_preview}", curses.color_pair(2))
+                    win.addstr(current_y, 2, f"[{timestamp_str}] {note_preview}", curses.color_pair(ColorPairs.SUCCESS))
                 except curses.error:
                     # Silently handle curses errors (e.g., string too wide)
                     pass
@@ -2339,8 +2371,8 @@ class TUI:
 
     def dialog_confirm(self, message):
         curses.curs_set(0)
-        h = 5
-        w = len(message) + 10
+        h, w_min = DialogSize.SMALL
+        w = max(w_min, len(message) + 10)
         y = self.height // 2 - 2
         x = (self.width - w) // 2
 
@@ -2373,8 +2405,7 @@ class TUI:
         options = ["GPG Signing", "Select GPG Key", "Save", "Cancel"]
 
         curses.curs_set(0)
-        h = 15  # Increased from 12 to properly show all 4 options + footer
-        w = 60
+        h, w = DialogSize.MEDIUM
         y = self.height // 2 - 7  # Adjusted to keep centered
         x = (self.width - w) // 2
 
@@ -2391,7 +2422,7 @@ class TUI:
 
             # GPG Signing status
             status = "ENABLED" if pgp_enabled else "DISABLED"
-            color = curses.color_pair(2) if pgp_enabled else curses.color_pair(3)
+            color = curses.color_pair(ColorPairs.SUCCESS) if pgp_enabled else curses.color_pair(ColorPairs.WARNING)
             win.addstr(4, 4, "GPG Signing: ")
             win.addstr(4, 18, f"{status}", color)
 
@@ -2408,7 +2439,7 @@ class TUI:
             for i, option in enumerate(options):
                 y_pos = 8 + i
                 if i == selected_option:
-                    win.addstr(y_pos, 4, f"> {option}", curses.color_pair(1))
+                    win.addstr(y_pos, 4, f"> {option}", curses.color_pair(ColorPairs.SELECTION))
                 else:
                     win.addstr(y_pos, 4, f"  {option}")
 
@@ -2470,8 +2501,8 @@ class TUI:
                     break
 
         curses.curs_set(0)
-        h = min(len(key_options) + 6, self.height - 4)
-        w = min(70, self.width - 4)
+        h = min(len(key_options) + 6, self.height - Spacing.DIALOG_MARGIN)
+        w = min(70, self.width - Spacing.DIALOG_MARGIN)
         y = (self.height - h) // 2
         x = (self.width - w) // 2
 
@@ -2509,7 +2540,7 @@ class TUI:
                 display_text = self._safe_truncate(display_text, w - 6)
 
                 if idx == selected_idx:
-                    win.addstr(y_pos, 2, f"> {display_text}", curses.color_pair(1))
+                    win.addstr(y_pos, 2, f"> {display_text}", curses.color_pair(ColorPairs.SELECTION))
                 else:
                     win.addstr(y_pos, 2, f"  {display_text}")
 
@@ -2544,13 +2575,13 @@ class TUI:
         # Calculate size based on message
         lines = message.split('\n')
         h = len(lines) + 5
-        w = min(max(len(line) for line in lines) + 6, self.width - 4)
+        w = min(max(len(line) for line in lines) + 6, self.width - Spacing.DIALOG_MARGIN)
         y = (self.height - h) // 2
         x = (self.width - w) // 2
 
         win = curses.newwin(h, w, y, x)
         win.box()
-        win.addstr(0, 2, f" {title} ", curses.A_BOLD | curses.color_pair(4))
+        win.addstr(0, 2, f" {title} ", curses.A_BOLD | curses.color_pair(ColorPairs.ERROR))
 
         for i, line in enumerate(lines):
             win.addstr(2 + i, 2, self._safe_truncate(line, w - 4))
@@ -2979,7 +3010,7 @@ class TUI:
                 except curses.error:
                     pass
 
-            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(ColorPairs.WARNING))
             win.refresh()
             key = win.getch()
             if key == -1:  # timeout, redraw
@@ -3095,7 +3126,7 @@ class TUI:
                 except curses.error:
                     pass
 
-            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(3))
+            win.addstr(h-2, 2, "[↑↓] Scroll  [n] Add Note  [b/q/Esc] Close", curses.color_pair(ColorPairs.WARNING))
             win.refresh()
             key = win.getch()
             if key == -1:  # timeout, redraw

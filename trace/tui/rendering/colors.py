@@ -39,5 +39,5 @@ def init_colors():
         curses.init_pair(ColorPairs.TAG, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
         # IOCs on selected background (red on cyan)
         curses.init_pair(ColorPairs.IOC_SELECTED, curses.COLOR_RED, curses.COLOR_CYAN)
-        # Tags on selected background (yellow on cyan)
-        curses.init_pair(ColorPairs.TAG_SELECTED, curses.COLOR_YELLOW, curses.COLOR_CYAN)
+        # Tags on selected background (magenta on cyan)
+        curses.init_pair(ColorPairs.TAG_SELECTED, curses.COLOR_MAGENTA, curses.COLOR_CYAN)

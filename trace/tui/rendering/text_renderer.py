@@ -113,15 +113,15 @@ class TextRenderer:
                     screen.addstr(y, x_pos, text)
                     screen.attroff(curses.color_pair(ColorPairs.ERROR) | curses.A_BOLD)
             else:  # tag
-                # Tag highlighting: yellow on cyan if selected, yellow on black otherwise
+                # Tag highlighting: magenta on cyan if selected, magenta on black otherwise
                 if is_selected:
                     screen.attron(curses.color_pair(ColorPairs.TAG_SELECTED))
                     screen.addstr(y, x_pos, text)
                     screen.attroff(curses.color_pair(ColorPairs.TAG_SELECTED))
                 else:
-                    screen.attron(curses.color_pair(ColorPairs.WARNING))
+                    screen.attron(curses.color_pair(ColorPairs.TAG))
                     screen.addstr(y, x_pos, text)
-                    screen.attroff(curses.color_pair(ColorPairs.WARNING))
+                    screen.attroff(curses.color_pair(ColorPairs.TAG))
 
             x_pos += len(text)
             last_pos = end
